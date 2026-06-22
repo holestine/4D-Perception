@@ -216,3 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project Items
+kaggle
+*.zip
+multi_object_tracking/

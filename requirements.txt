@@ -1,0 +1,25 @@
+#conda deactivate; conda env remove --name 4D -y
+#conda create --name 4D python=3.10 cudatoolkit=11.7 -c conda-forge -y
+#conda activate 4D; pip install -r requirements.txt
+
+ipykernel
+tqdm
+easydict
+opencv-python
+scipy
+scikit-image
+torch==1.13.1
+torchvision
+torchaudio
+matplotlib
+pyquaternion==0.9.9
+spconv-cu118
+SharedArray2
+ipyvtklink
+rerun-sdk==0.22.1
+
+
+open3d
+rerun-sdk[notebook]==0.22.1
+numpy==1.23.5
+scipy==1.14.1
