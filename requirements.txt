@@ -6,7 +6,6 @@ ipykernel
 tqdm
 easydict
 opencv-python
-scipy
 scikit-image
 torch==1.13.1
 torchvision
@@ -16,10 +15,10 @@ pyquaternion==0.9.9
 spconv-cu118
 SharedArray2
 ipyvtklink
-rerun-sdk==0.22.1
-
-
 open3d
+Pillow
+PyYAML
+requests
 rerun-sdk[notebook]==0.22.1
 numpy==1.23.5
 scipy==1.14.1
