@@ -223,3 +223,4 @@ kaggle
 multi_object_tracking/
 *.rrd
 tracking/
+__MACOSX/
