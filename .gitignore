@@ -221,3 +221,5 @@ __marimo__/
 kaggle
 *.zip
 multi_object_tracking/
+*.rrd
+tracking/
