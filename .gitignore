@@ -224,3 +224,5 @@ multi_object_tracking/
 *.rrd
 tracking/
 __MACOSX/
+*.mp4
+models/

@@ -1,0 +1,191 @@
+import cv2
+import matplotlib.pyplot as plt
+import numpy as np
+import rerun as rr
+import rerun.blueprint as rrb
+from scipy.spatial.transform import Rotation as R
+
+from perception.visualization.geometry import project_3d_box_to_image
+
+_CAR_OBJ   = "multi_object_tracking/viewer/car.obj"
+_CAR_SCALE = [0.5, 0.5, 0.5]   # ego vehicle: 0.5× native OBJ size
+
+# Native bounding box of car.obj (metres): length × width × height
+_OBJ_NATIVE = np.array([8.95, 3.71, 2.97], dtype=np.float32)
+
+
+def _mask_points_outside_boxes(positions, boxes, margin=0.3):
+    """Boolean mask selecting points that fall outside all bounding boxes.
+
+    Parameters
+    ----------
+    positions : ndarray (N, 3)
+    boxes     : list of (center, l, w, h, yaw)
+    margin    : float  extra clearance in metres per half-extent
+
+    Returns
+    -------
+    ndarray bool (N,)  True = point is outside every box
+    """
+    keep = np.ones(len(positions), dtype=bool)
+    for center, l, w, h, yaw in boxes:
+        pts     = positions - center
+        c, s    = np.cos(yaw), np.sin(yaw)
+        local_x =  pts[:, 0] * c + pts[:, 1] * s
+        local_y = -pts[:, 0] * s + pts[:, 1] * c
+        local_z =  pts[:, 2]
+        inside  = (
+            (np.abs(local_x) <= l / 2 + margin) &
+            (np.abs(local_y) <= w / 2 + margin) &
+            (np.abs(local_z) <= h / 2 + margin)
+        )
+        keep &= ~inside
+    return keep
+
+
+def visualize_tracking(dataset, frames, final_det_ids, threshold=4, out_file=None):
+    """Render tracked detections with the Rerun SDK.
+
+    Two side-by-side views:
+      - Camera: raw image with 3D bounding boxes projected onto it.
+      - LiDAR:  coloured point cloud with a 3D car mesh per confirmed track.
+
+    Parameters
+    ----------
+    dataset        : KittiDetectionDataset
+    frames         : iterable of int  frame indices to visualize
+    final_det_ids  : list[ndarray]    per-frame confirmed track IDs from the tracking loop
+    threshold      : float            minimum score for unconfirmed detections (default 4)
+    out_file       : str or None      save to .rrd file instead of displaying inline
+    """
+    blueprint = rrb.Blueprint(
+        rrb.Horizontal(
+            rrb.Spatial2DView(origin="world/ego_vehicle/camera", name="Camera"),
+            rrb.Spatial3DView(origin="world/ego_vehicle/lidar",  name="LiDAR"),
+            column_shares=[1, 1],
+        )
+    )
+    rr.init("KITTI Visualizer Tracking", spawn=False, default_blueprint=blueprint)
+    rr.log("world/ego_vehicle/camera/", rr.ViewCoordinates.RIGHT_HAND_Y_DOWN)
+    rr.log("world/ego_vehicle/lidar/",  rr.ViewCoordinates.RIGHT_HAND_Z_UP)
+
+    frames = list(frames)
+    cmap   = plt.get_cmap("tab20")
+
+    logged_models: set[int] = set()
+    prev_active:   set[int] = set()
+    ego_car_logged           = False
+
+    for i in frames:
+        rr.set_time("frame", sequence=i)
+
+        rr.log("world/ego_vehicle/camera/image/detections", rr.Clear(recursive=True))
+        rr.log("world/ego_vehicle/lidar/points",            rr.Clear(recursive=False))
+
+        data = dataset[i]
+        pose          = data["pose"]
+        P2            = data["P2"]
+        points        = data["points"]
+        image         = data["image"]
+        objects_lidar = data["objects"]
+        objects_cam   = data["objects_cam"]
+        det_scores    = data["scores"]
+
+        # ── Ego vehicle ───────────────────────────────────────────────────────
+        if pose is not None:
+            translation = pose[:3, 3]
+            quat_xyzw   = R.from_matrix(pose[:3, :3]).as_quat()
+            rr.log("world/ego_vehicle", rr.Transform3D(
+                translation=translation,
+                quaternion=rr.Quaternion(xyzw=quat_xyzw),
+                relation=rr.TransformRelation.ParentFromChild,
+            ))
+            if not ego_car_logged:
+                rr.log("world/ego_vehicle/lidar/car_model",
+                       rr.Transform3D(scale=_CAR_SCALE))
+                rr.log("world/ego_vehicle/lidar/car_model/mesh",
+                       rr.Asset3D(path=_CAR_OBJ))
+                ego_car_logged = True
+
+        # ── Camera image ──────────────────────────────────────────────────────
+        rr.log("world/ego_vehicle/camera/image",
+               rr.Image(cv2.cvtColor(image, cv2.COLOR_BGR2RGB)))
+
+        # ── Point cloud (deferred until box masking is ready) ─────────────────
+        positions = points[:, :3]
+        distances = np.linalg.norm(positions, axis=1)
+        norm      = (255.0 * (distances - distances.min()) /
+                     (np.ptp(distances) + 1e-5)).astype(np.uint8)
+        colors    = (plt.cm.cividis(norm / 255.0)[:, :3] * 255).astype(np.uint8)
+
+        # ── Per-detection visualisation ───────────────────────────────────────
+        confirmed_mask = final_det_ids[i] > 0
+        score_mask     = det_scores > threshold
+        vis_mask       = confirmed_mask | score_mask
+        objects_cam_v  = objects_cam[vis_mask]
+        objects_lid_v  = np.array(objects_lidar)[vis_mask]
+        det_ids        = final_det_ids[i][vis_mask]
+
+        detected_boxes: list[tuple] = []
+        curr_active:    set[int]    = set()
+
+        box_edges = [
+            [0, 1], [1, 2], [2, 3], [3, 0],
+            [4, 5], [5, 6], [6, 7], [7, 4],
+            [0, 4], [1, 5], [2, 6], [3, 7],
+        ]
+
+        for obj_cam, obj_lid, track_id in zip(objects_cam_v, objects_lid_v, det_ids):
+            if track_id == 0:
+                continue
+
+            color = (np.array(cmap(track_id % cmap.N)) * 255).astype(np.uint8)
+
+            corners_2d = project_3d_box_to_image(obj_cam, P2, image.shape)
+            if corners_2d is not None:
+                lines = [np.array([corners_2d[s], corners_2d[e]]) for s, e in box_edges]
+                rr.log(
+                    f"world/ego_vehicle/camera/image/detections/box_{track_id}",
+                    rr.LineStrips2D(lines, labels=[f"{track_id}"], colors=np.array(color)),
+                )
+
+            h, w, l, x, y, z, ry = obj_lid.tolist()
+            if l * w * h == 0:
+                continue
+
+            yaw    = -ry - np.pi / 2
+            center = np.array([x, y, z + h / 2])
+            quat   = R.from_euler("z", yaw, degrees=False).as_quat()
+            detected_boxes.append((center, l, w, h, yaw))
+
+            rr.log(
+                f"world/ego_vehicle/lidar/models/car_{track_id}",
+                rr.Transform3D(
+                    translation=center,
+                    quaternion=rr.Quaternion(xyzw=quat),
+                    scale=[l / _OBJ_NATIVE[0], w / _OBJ_NATIVE[1], h / _OBJ_NATIVE[2]],
+                    relation=rr.TransformRelation.ParentFromChild,
+                ),
+            )
+            if track_id not in logged_models:
+                rr.log(
+                    f"world/ego_vehicle/lidar/models/car_{track_id}/model",
+                    rr.Asset3D(path=_CAR_OBJ, albedo_factor=color[:3] / 255.0),
+                )
+                logged_models.add(track_id)
+
+            curr_active.add(track_id)
+
+        for dead_id in prev_active - curr_active:
+            rr.log(f"world/ego_vehicle/lidar/models/car_{dead_id}", rr.Clear(recursive=True))
+            logged_models.discard(dead_id)
+        prev_active = curr_active
+
+        keep = _mask_points_outside_boxes(positions, detected_boxes)
+        rr.log("world/ego_vehicle/lidar/points",
+               rr.Points3D(positions=positions[keep], colors=colors[keep]))
+
+    if out_file is not None:
+        rr.save(out_file, default_blueprint=blueprint)
+    else:
+        rr.notebook_show(height=500, width=1000)
