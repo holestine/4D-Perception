@@ -7,11 +7,10 @@ from scipy.spatial.transform import Rotation as R
 
 from perception.visualization.geometry import project_3d_box_to_image
 
-_CAR_OBJ   = "multi_object_tracking/viewer/car.obj"
-_CAR_SCALE = [0.5, 0.5, 0.5]   # ego vehicle: 0.5× native OBJ size
-
-# Native bounding box of car.obj (metres): length × width × height
-_OBJ_NATIVE = np.array([8.95, 3.71, 2.97], dtype=np.float32)
+_CAR_OBJ        = "multi_object_tracking/viewer/car.obj"
+_CAR_SCALE      = [0.5, 0.5, 0.5]   # ego vehicle: 0.5× native OBJ size
+_OBJ_NATIVE     = np.array([8.95, 3.71, 2.97], dtype=np.float32)
+_VEHICLE_CLASSES = {"Car", "Van", "Truck"}
 
 
 def _mask_points_outside_boxes(positions, boxes, margin=0.3):
@@ -125,6 +124,7 @@ def visualize_tracking(dataset, frames, final_det_ids, threshold=4, out_file=Non
         objects_cam_v  = objects_cam[vis_mask]
         objects_lid_v  = np.array(objects_lidar)[vis_mask]
         det_ids        = final_det_ids[i][vis_mask]
+        names_v        = np.array(data["names"])[vis_mask]
 
         detected_boxes: list[tuple] = []
         curr_active:    set[int]    = set()
@@ -135,7 +135,9 @@ def visualize_tracking(dataset, frames, final_det_ids, threshold=4, out_file=Non
             [0, 4], [1, 5], [2, 6], [3, 7],
         ]
 
-        for obj_cam, obj_lid, track_id in zip(objects_cam_v, objects_lid_v, det_ids):
+        for obj_cam, obj_lid, track_id, name in zip(
+            objects_cam_v, objects_lid_v, det_ids, names_v
+        ):
             if track_id == 0:
                 continue
 
@@ -158,26 +160,34 @@ def visualize_tracking(dataset, frames, final_det_ids, threshold=4, out_file=Non
             quat   = R.from_euler("z", yaw, degrees=False).as_quat()
             detected_boxes.append((center, l, w, h, yaw))
 
-            rr.log(
-                f"world/ego_vehicle/lidar/models/car_{track_id}",
-                rr.Transform3D(
+            entity = f"world/ego_vehicle/lidar/models/track_{track_id}"
+
+            if name in _VEHICLE_CLASSES:
+                rr.log(entity, rr.Transform3D(
                     translation=center,
                     quaternion=rr.Quaternion(xyzw=quat),
                     scale=[l / _OBJ_NATIVE[0], w / _OBJ_NATIVE[1], h / _OBJ_NATIVE[2]],
                     relation=rr.TransformRelation.ParentFromChild,
-                ),
-            )
-            if track_id not in logged_models:
-                rr.log(
-                    f"world/ego_vehicle/lidar/models/car_{track_id}/model",
-                    rr.Asset3D(path=_CAR_OBJ, albedo_factor=color[:3] / 255.0),
-                )
-                logged_models.add(track_id)
+                ))
+                if track_id not in logged_models:
+                    rr.log(f"{entity}/model", rr.Asset3D(
+                        path=_CAR_OBJ, albedo_factor=color[:3] / 255.0,
+                    ))
+                    logged_models.add(track_id)
+            else:
+                # Cyclist / Pedestrian — draw a box primitive instead of a car mesh
+                rr.log(entity, rr.Boxes3D(
+                    half_sizes=[[l / 2, w / 2, h / 2]],
+                    centers=[center],
+                    rotations=[rr.Quaternion(xyzw=quat)],
+                    colors=[color[:3]],
+                    labels=[f"{name} {track_id}"],
+                ))
 
             curr_active.add(track_id)
 
         for dead_id in prev_active - curr_active:
-            rr.log(f"world/ego_vehicle/lidar/models/car_{dead_id}", rr.Clear(recursive=True))
+            rr.log(f"world/ego_vehicle/lidar/models/track_{dead_id}", rr.Clear(recursive=True))
             logged_models.discard(dead_id)
         prev_active = curr_active
 
