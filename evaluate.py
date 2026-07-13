@@ -17,7 +17,12 @@ import numpy as np
 from perception.boxes import kitti_camera_to_lidar, register_bbs
 from perception.cli import add_dataset_args, add_tracker_args, build_label_source, build_tracker
 from perception.datasets.kitti import KittiSequence
-from perception.evaluation import evaluate_tracking, format_summary, read_tracking_labels
+from perception.evaluation import (
+    evaluate_hota,
+    evaluate_tracking,
+    format_summary,
+    read_tracking_labels,
+)
 
 
 def parse_args():
@@ -56,10 +61,14 @@ def main():
             gt_boxes = register_bbs(gt_boxes.astype(np.float64), frame.ego_pose)
             yield gt_ids, gt_boxes[:, :2], pred_ids, pred_xy
 
-    metrics = evaluate_tracking(frames(), dist_threshold=args.dist_threshold)
+    per_frame = list(frames())
+    metrics = evaluate_tracking(per_frame, dist_threshold=args.dist_threshold)
+    hota    = evaluate_hota(per_frame, max_dist=2 * args.dist_threshold)
 
     print(f"\nSequence {seq_name} | detector: {args.detector} | "
           f"score>{args.score_threshold} | match dist {args.dist_threshold} m\n")
+    print(f"HOTA               {hota['hota']:8.3f}   "
+          f"(DetA {hota['det_a']:.3f} · AssA {hota['ass_a']:.3f} · LocA {hota['loc_a']:.3f})")
     print(format_summary(metrics))
 
 

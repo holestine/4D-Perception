@@ -1,7 +1,12 @@
 import numpy as np
 import pytest
 
-from perception.evaluation import evaluate_tracking, format_summary, read_tracking_labels
+from perception.evaluation import (
+    evaluate_hota,
+    evaluate_tracking,
+    format_summary,
+    read_tracking_labels,
+)
 
 GT_LINE = ("{frame} {tid} {cls} 0 0 -1.5 0 0 50 50 "
            "1.5 1.8 4.0 -2.0 1.25 10.0 0.4\n")
@@ -84,3 +89,48 @@ def test_format_summary_renders_all_metrics():
     frames = [([1], _xy((0, 0)), [11], _xy((0, 0)))]
     text = format_summary(evaluate_tracking(frames))
     assert "MOTA" in text and "IDF1" in text and "ID switches" in text
+
+
+class TestEvaluateHota:
+    """Analytic cases from the HOTA definition (Luiten et al., IJCV 2021)."""
+
+    def test_perfect_tracking_scores_one(self):
+        frames = [([1], _xy((float(k), 0)), [11], _xy((float(k), 0))) for k in range(10)]
+        m = evaluate_hota(frames)
+        assert m["hota"]  == pytest.approx(1.0)
+        assert m["det_a"] == pytest.approx(1.0)
+        assert m["ass_a"] == pytest.approx(1.0)
+        assert m["loc_a"] == pytest.approx(1.0)
+
+    def test_id_swap_halfway_gives_half_assa(self):
+        # one GT trajectory covered by two tracker IDs, half each:
+        # every TP pair has association Jaccard (T/2)/(T/2 + T/2) = 0.5
+        frames  = [([1], _xy((float(k), 0)), [11], _xy((float(k), 0))) for k in range(5)]
+        frames += [([1], _xy((float(k), 0)), [22], _xy((float(k), 0))) for k in range(5, 10)]
+        m = evaluate_hota(frames)
+        assert m["det_a"] == pytest.approx(1.0)
+        assert m["ass_a"] == pytest.approx(0.5)
+        assert m["hota"]  == pytest.approx(np.sqrt(0.5))
+
+    def test_half_coverage_gives_half_deta_and_half_assa(self):
+        # tracker only exists for the first half of one GT trajectory:
+        # DetA = TP/(TP+FN) = 0.5; each TP pair Jaccard = (T/2)/T = 0.5
+        frames  = [([1], _xy((float(k), 0)), [11], _xy((float(k), 0))) for k in range(5)]
+        frames += [([1], _xy((float(k), 0)), [],   _xy()) for k in range(5, 10)]
+        m = evaluate_hota(frames)
+        assert m["det_a"] == pytest.approx(0.5)
+        assert m["ass_a"] == pytest.approx(0.5)
+        assert m["hota"]  == pytest.approx(0.5)
+
+    def test_alpha_sweep_gates_on_distance(self):
+        # constant 2 m offset with max_dist 4 → similarity 0.5 everywhere:
+        # matched for the 10 alphas ≤ 0.5, unmatched for the 9 above
+        frames = [([1], _xy((float(k), 0)), [11], _xy((float(k), 2.0))) for k in range(10)]
+        m = evaluate_hota(frames, max_dist=4.0)
+        assert m["det_a"] == pytest.approx(10 / 19)
+        assert m["loc_a"] == pytest.approx(0.5)
+
+    def test_empty_sequence_edge_cases(self):
+        assert evaluate_hota([([], _xy(), [], _xy())])["hota"] == 1.0
+        assert evaluate_hota([([1], _xy((0, 0)), [], _xy())])["hota"] == 0.0
+        assert evaluate_hota([([], _xy(), [11], _xy((0, 0)))])["hota"] == 0.0

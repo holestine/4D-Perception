@@ -198,13 +198,26 @@ python evaluate.py --detector casa --score-threshold -1.0
 Confirmed tracks are matched to ground-truth vehicles (Car/Van/Truck) on
 bird's-eye-view centre distance (2 m gate, nuScenes-style) in the world frame.
 
+Two metric families are reported: CLEAR-MOT (via motmetrics) and **HOTA**
+(implemented in `perception/evaluation.py` following [Luiten et al., IJCV 2021](https://arxiv.org/abs/2009.07736),
+validated with analytic unit tests). HOTA decomposes into detection accuracy (DetA)
+and association accuracy (AssA), so detection and identity quality carry equal weight.
+
 Results on sequence 0008 (pre-computed detections, tuned tracker defaults —
 `min_hits=2, max_missed=3, gate=4.5`, selected by parameter sweep with this harness):
 
-| Detector | MOTA | MOTP | IDF1 | ID sw. | FP | FN | MT |
-|---|---|---|---|---|---|---|---|
-| `pvrcnn` @ 0.5 | **0.553** | 0.284 m | **0.731** | 1 | 82 | 529 | 15/27 |
-| `casa` @ −1.0 | 0.533 | 0.251 m | 0.724 | 4 | 141 | 495 | 16/27 |
+| Detector | HOTA | DetA | AssA | MOTA | IDF1 | ID sw. | FP | FN |
+|---|---|---|---|---|---|---|---|---|
+| `casa` @ −1.0 | **0.641** | 0.548 | 0.750 | 0.533 | 0.724 | 4 | 141 | 495 |
+| `pvrcnn` @ 0.5 | 0.633 | 0.544 | 0.737 | **0.553** | 0.731 | 1 | 82 | 529 |
+
+Note the metric families disagree on the winner: casa finds more objects with
+better identity continuity (higher HOTA), while pvrcnn makes fewer false
+positives (higher MOTA) — exactly the trade-off HOTA's DetA/AssA split makes
+visible. The split also confirms detection coverage, not association, is the
+bottleneck: distant/occluded vehicles the detector misses account for most of
+the lost score. Longer track coasting (`max_missed` 5/8/12) was re-tested
+under HOTA and loses on both DetA *and* AssA — the tuned defaults hold.
 
 (Pre-tuning defaults `min_hits=3, max_missed=5, gate=6.0` scored MOTA 0.520 / 0.468.
 A tighter `--gate 3.0` reaches MOTA 0.560 on this sequence but was left off the

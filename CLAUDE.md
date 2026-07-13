@@ -145,15 +145,20 @@ so the same `score_threshold` value means different things.
 
 ### Evaluation
 - `evaluate.py` runs the tracker and scores confirmed tracks against KITTI tracking ground truth
-  (`data/label_02/<seq>.txt`) with CLEAR-MOT metrics (motmetrics package)
+  (`data/label_02/<seq>.txt`) with two metric families: CLEAR-MOT (motmetrics package) and
+  HOTA (implemented in perception/evaluation.py per Luiten et al. IJCV 2021 — TrackEval's
+  file-format harness not used; validated with analytic unit tests)
 - Matching: BEV centre distance in the world frame, 2 m gate (nuScenes-style) — GT boxes go
-  through the same `kitti_camera_to_lidar` + `register_bbs` path as detections
+  through the same `kitti_camera_to_lidar` + `register_bbs` path as detections. HOTA similarity
+  is `max(0, 1 − d / (2 × gate))`, so alpha 0.5 corresponds to the CLEAR-MOT gate.
 - GT classes evaluated: Car, Van, Truck (the tracker is class-agnostic; DontCare dropped)
 - Current numbers, seq 0008, tuned defaults (min_hits=2, max_missed=3, gate=4.5):
-  pvrcnn@0.5 → MOTA 0.553, IDF1 0.731, 1 switch, FP 82, FN 529 / 1369, MT 15/27.
-  casa@−1.0 → MOTA 0.533, IDF1 0.724. Pre-tuning (min_hits=3, max_missed=5, gate=6.0)
-  scored 0.520 / 0.468. `--gate 3.0` reaches 0.560 but is single-sequence tuning.
-  FN-dominated: most lost GT is distant/occluded vehicles the detector misses at these thresholds.
+  pvrcnn@0.5 → HOTA 0.633 (DetA 0.544 · AssA 0.737), MOTA 0.553, IDF1 0.731.
+  casa@−1.0 → HOTA 0.641, MOTA 0.533 — the families disagree on the winner (casa: more
+  objects + better continuity; pvrcnn: fewer FPs). Pre-tuning defaults scored MOTA 0.520 / 0.468.
+- max_missed re-tested under HOTA: longer coasting loses on both DetA and AssA — coasted
+  predictions drift off the GT — so max_missed=3 holds under both metric families.
+- FN-dominated: most lost GT is distant/occluded vehicles the detector misses at these thresholds.
 
 ### Tracker (3D SORT)
 - 10-dimensional Kalman filter state: `[x, y, z, l, w, h, yaw, vx, vy, vz]`
