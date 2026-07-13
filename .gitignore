@@ -219,6 +219,7 @@ __marimo__/
 
 # Project Items
 kaggle
+data/
 *.zip
 multi_object_tracking/
 # external clone with local patches; has its own .git — see CLAUDE.md for modified files

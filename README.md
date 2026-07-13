@@ -183,6 +183,22 @@ python main.py
 
 Produces `tracking.rrd` (open with `rerun tracking.rrd`) and `showcase.mp4`.
 
+### Optional: nuScenes
+
+The same pipeline runs on [nuScenes](https://www.nuscenes.org/) scenes. Download the
+free mini split (~4 GB, no devkit needed — the adapter reads the JSON tables directly):
+
+```bash
+mkdir -p data/nuscenes && cd data/nuscenes
+wget https://www.nuscenes.org/data/v1.0-mini.tgz && tar -xzf v1.0-mini.tgz && cd ../..
+python main.py --dataset nuscenes --scene 0
+```
+
+Ground-truth annotations are served as detections (there is no nuScenes-trained
+detector wired up yet), so this demonstrates the adapter, tracker, and
+visualization — not detection quality. The tracker's `dt` switches to 0.5 s
+automatically (nuScenes keyframes are 2 Hz).
+
 ---
 
 ## Evaluation
@@ -262,6 +278,7 @@ perception/                   Core library
     base.py                   SequenceDataset interface
     kitti.py                  KittiSequence adapter + KittiLabelSource (pre-computed files)
     kitti_io.py               Low-level KITTI I/O (calibration, LiDAR, images, poses)
+    nuscenes.py               NuScenesSequence adapter + GT detection source (no devkit)
   tracker/
     track.py                  Obstacle3D — per-track Kalman filter
     mot.py                    Tracker3D — Hungarian assignment + track lifecycle

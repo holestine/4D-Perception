@@ -34,13 +34,14 @@ def add_tracker_args(parser):
                         help="Q-scale for the velocity states")
 
 
-def build_tracker(args):
+def build_tracker(args, dt=0.1):
     return Tracker3D(config={
         "score_threshold":        args.score_threshold,
         "min_hits":               args.min_hits,
         "max_missed":             args.max_missed,
         "dist_threshold":         args.gate,
         "velocity_process_noise": args.velocity_process_noise,
+        "dt":                     dt,
     })
 
 

@@ -28,6 +28,9 @@ perception/                   Our source code — all new code goes here
     kitti.py                  KittiSequence adapter + KittiLabelSource (pre-computed .txt files)
     kitti_io.py               Low-level KITTI I/O: read_calib, read_velodyne, reduce_to_fov,
                                read_image, read_pose, cam_to_velo, velo_to_cam
+    nuscenes.py               NuScenesSequence adapter + NuScenesGTDetections (GT-as-detections);
+                               parses the JSON tables directly — the devkit pins numpy<2 (rerun
+                               needs ≥2), so it is deliberately NOT a dependency
   tracker/
     track.py                  Obstacle3D (Kalman filter per track)
     mot.py                    Tracker3D (Hungarian assignment + lifecycle)
@@ -140,8 +143,14 @@ so the same `score_threshold` value means different things.
   provides raw LiDAR points; `KittiLabelSource` parses pre-computed KITTI .txt files
 - The live detector consumes the **raw** point cloud (PV-RCNN detects 360°); `Frame.points` is
   the FOV-cropped cloud used for visualization — don't feed the cropped one to a detector
-- **Adding Waymo/nuScenes** = one new adapter producing Frames + (optionally) a file-based
-  DetectionSource for that dataset's pre-computed detections; tracker and visualizers are untouched
+- **nuScenes**: `python main.py --dataset nuscenes --scene 0` runs any v1.0-mini scene
+  (data at `data/nuscenes/`, gitignored). GT annotations are served as detections
+  (NuScenesGTDetections) — no nuScenes-trained detector wired up yet. dt auto-switches
+  to 0.5 s (2 Hz keyframes). Adding a real detector = an OpenPCDetSource with a
+  nuScenes-trained model, nothing else changes.
+- **Waymo** (future): same pattern — one SequenceDataset adapter. Practical hurdles are the
+  dataset licence (Google account + terms) and the TF-based waymo-open-dataset reader;
+  consider parsing TFRecords with protobuf only, mirroring the no-devkit nuScenes approach.
 
 ### Evaluation
 - `evaluate.py` runs the tracker and scores confirmed tracks against KITTI tracking ground truth

@@ -97,7 +97,10 @@ def create_tracking_video(
     output_height  : int             pixel height of each panel
     """
     frames = list(frames)
-    H      = output_height
+    if not frames:
+        print(f"No frames to render for '{out_file}' — skipped")
+        return
+    H = output_height
 
     obj_verts, obj_edges = _load_obj_crease_edges(CAR_OBJ_PATH, crease_angle_deg=50)
 
