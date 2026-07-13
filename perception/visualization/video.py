@@ -72,7 +72,7 @@ def create_tracking_video(
     dataset,
     frames,
     final_det_ids,
-    threshold=4,
+    show_unconfirmed_above=4.0,
     out_file="tracking.mp4",
     fps=10,
     output_height=480,
@@ -88,7 +88,9 @@ def create_tracking_video(
     dataset        : SequenceDataset
     frames         : iterable of int
     final_det_ids  : list[ndarray]   per-frame confirmed track IDs
-    threshold      : float           minimum score for unconfirmed detections
+    show_unconfirmed_above : float
+        Also draw unconfirmed detections scoring above this (default 4 —
+        raw-logit scale, so sigmoid-scored detections are never drawn).
     out_file       : str             output path
     fps            : int
     output_height  : int             pixel height of each panel
@@ -120,7 +122,7 @@ def create_tracking_video(
         det_scores = frame.detections.scores
 
         confirmed_mask = final_det_ids[i] > 0
-        score_mask     = det_scores > threshold
+        score_mask     = det_scores > show_unconfirmed_above
         vis_mask       = confirmed_mask | score_mask
 
         boxes_v = np.array(boxes)[vis_mask]

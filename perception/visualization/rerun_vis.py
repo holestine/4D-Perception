@@ -45,7 +45,7 @@ def _mask_points_outside_boxes(positions, boxes, margin=0.3):
     return keep
 
 
-def visualize_tracking(dataset, frames, final_det_ids, threshold=4, out_file=None):
+def visualize_tracking(dataset, frames, final_det_ids, show_unconfirmed_above=4.0, out_file=None):
     """Render tracked detections with the Rerun SDK.
 
     Two side-by-side views:
@@ -57,7 +57,9 @@ def visualize_tracking(dataset, frames, final_det_ids, threshold=4, out_file=Non
     dataset        : SequenceDataset
     frames         : iterable of int  frame indices to visualize
     final_det_ids  : list[ndarray]    per-frame confirmed track IDs from the tracking loop
-    threshold      : float            minimum score for unconfirmed detections (default 4)
+    show_unconfirmed_above : float
+        Also draw unconfirmed detections scoring above this (default 4 —
+        raw-logit scale, so sigmoid-scored detections are never drawn).
     out_file       : str or None      save to .rrd file instead of displaying inline
     """
     blueprint = rrb.Blueprint(
@@ -122,7 +124,7 @@ def visualize_tracking(dataset, frames, final_det_ids, threshold=4, out_file=Non
 
         # ── Per-detection visualisation ───────────────────────────────────────
         confirmed_mask = final_det_ids[i] > 0
-        score_mask     = det_scores > threshold
+        score_mask     = det_scores > show_unconfirmed_above
         vis_mask       = confirmed_mask | score_mask
         boxes_v        = np.array(boxes)[vis_mask]
         det_ids        = final_det_ids[i][vis_mask]

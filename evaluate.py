@@ -15,28 +15,19 @@ import os
 import numpy as np
 
 from perception.boxes import kitti_camera_to_lidar, register_bbs
-from perception.datasets.kitti import KittiLabelSource, KittiSequence
+from perception.cli import add_dataset_args, add_tracker_args, build_label_source, build_tracker
+from perception.datasets.kitti import KittiSequence
 from perception.evaluation import evaluate_tracking, format_summary, read_tracking_labels
-from perception.tracker.mot import Tracker3D
 
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--data-root",  default="multi_object_tracking/data")
-    p.add_argument("--label-root", default="multi_object_tracking/detectors")
-    p.add_argument("--detector",   default="pvrcnn",
-                   help="pre-computed detector directory name (pvrcnn, casa, second_iou, point_rcnn)")
-    p.add_argument("--seq", type=int, default=8)
+    add_dataset_args(p)
+    add_tracker_args(p)
     p.add_argument("--gt", default=None,
                    help="ground-truth label file (default: <data-root>/label_02/<seq>.txt)")
-    p.add_argument("--score-threshold",  type=float, default=0.5)
-    p.add_argument("--dist-threshold",   type=float, default=2.0,
+    p.add_argument("--dist-threshold", type=float, default=2.0,
                    help="max BEV centre distance in metres for a GT match")
-    p.add_argument("--min-hits",   type=int,   default=2)
-    p.add_argument("--max-missed", type=int,   default=3)
-    p.add_argument("--gate",       type=float, default=4.5,
-                   help="tracker Mahalanobis association gate")
-    p.add_argument("--velocity-process-noise", type=float, default=1.0)
     return p.parse_args()
 
 
@@ -45,19 +36,9 @@ def main():
     seq_name = str(args.seq).zfill(4)
     gt_path = args.gt or os.path.join(args.data_root, "label_02", seq_name + ".txt")
 
-    dataset = KittiSequence(
-        args.data_root, seq_id=args.seq,
-        detections=KittiLabelSource(
-            os.path.join(args.label_root, args.detector), args.seq, args.data_root
-        ),
-    )
-    tracker = Tracker3D(config={
-        "score_threshold":        args.score_threshold,
-        "min_hits":               args.min_hits,
-        "max_missed":             args.max_missed,
-        "dist_threshold":         args.gate,
-        "velocity_process_noise": args.velocity_process_noise,
-    })
+    dataset = KittiSequence(args.data_root, seq_id=args.seq,
+                            detections=build_label_source(args))
+    tracker = build_tracker(args)
     gt = read_tracking_labels(gt_path)
 
     def frames():

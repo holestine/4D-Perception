@@ -28,5 +28,13 @@
             "console": "integratedTerminal",
             "justMyCode": false
         },
+        {
+            "name": "Python: Evaluate",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "evaluate.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal"
+        },
     ]
 }

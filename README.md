@@ -62,9 +62,10 @@ Constant-velocity motion model; box dimensions and yaw modelled as constant betw
 - Yaw differences wrapped to `[−π, π]` before computing distance to handle the 180° ambiguity
 
 **Track lifecycle:**
-- `min_hits = 3` consecutive detections to confirm a track
-- `max_missed = 5` consecutive misses before pruning
+- `min_hits = 2` consecutive detections to confirm a track
+- `max_missed = 3` consecutive misses before pruning
 - **Persistent confirmation** (`_confirmed_ids` set): once confirmed, a track stays visible through missed frames — critical for large vehicles that intermittently fall below detection threshold
+- **Class-gated association:** detections only match tracks from the same class group ({Car, Van, Truck} / {Pedestrian} / {Cyclist}) — vehicles share a group because detectors flip labels on the same object
 
 ### Sensor Fusion & Coordinate Handling
 
@@ -213,25 +214,16 @@ defaults — tuned on a single sequence, the χ²-principled 4.5 gate is safer.)
 
 ## Configuration
 
-Edit the top of `main.py` to switch between pre-computed and live detection:
+Everything is a command-line option (`python main.py --help` for the full list):
 
-```python
-# Option A — pre-computed (fast, no GPU required):
-#   label root: multi_object_tracking/detectors/pvrcnn (or casa, second_iou, point_rcnn)
-detections = KittiLabelSource("multi_object_tracking/detectors/pvrcnn", SEQ_ID, DATA_ROOT)
-
-# Option B — live PV-RCNN inference:
-from detector import OpenPCDetDetector
-detections = OpenPCDetSource(OpenPCDetDetector(
-    cfg_file   = "OpenPCDet/tools/cfgs/kitti_models/pv_rcnn.yaml",
-    checkpoint = "models/PVRCNN/pv_rcnn_8369.pth",
-    data_root  = DATA_ROOT,
-))
-
-dataset = KittiSequence(DATA_ROOT, seq_id=SEQ_ID, detections=detections)
+```bash
+python main.py                              # pre-computed pvrcnn (fast, no GPU)
+python main.py --live                       # live PV-RCNN inference
+python main.py --detector casa --score-threshold -1.0
+python main.py --frames 50 --no-video       # quick look at the first 50 frames
 ```
 
-Tracker hyperparameters in `main.py`:
+Tracker hyperparameters (shared by `main.py` and `evaluate.py`):
 
 | Parameter | Default | Effect |
 |---|---|---|
@@ -265,9 +257,10 @@ perception/                   Core library
     rerun_vis.py              Rerun SDK visualization
     video.py                  MP4 export with dual camera/LiDAR panels
   evaluation.py               CLEAR-MOT metrics against KITTI tracking ground truth
+  cli.py                      Shared command-line options for the entry points
 
 tests/                        Unit tests (pytest)
-main.py                       Entry point
+main.py                       Entry point (argparse CLI)
 evaluate.py                   Tracking evaluation entry point (CLEAR-MOT)
 detector.py                   OpenPCDet live inference wrapper (model-agnostic)
 requirements.txt

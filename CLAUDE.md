@@ -36,9 +36,10 @@ perception/                   Our source code — all new code goes here
     rerun_vis.py              visualize_tracking + _mask_points_outside_boxes
     video.py                  create_tracking_video + OBJ crease-edge loader
   evaluation.py               read_tracking_labels + evaluate_tracking (CLEAR-MOT via motmetrics)
+  cli.py                      shared argparse options (dataset + tracker) for main.py/evaluate.py
 
 tests/                        Unit tests — run with `python -m pytest tests/`
-main.py                       Entry point (~75 lines): dataset, tracker, loop, visualizers
+main.py                       Entry point: argparse CLI, tracking loop, visualizer calls
 evaluate.py                   Evaluation entry point (argparse; detector/threshold/gate options)
 detector.py                   OpenPCDet live detector wrapper (model-agnostic)
 
@@ -56,13 +57,15 @@ OpenPCDet/                    Cloned OpenPCDet source (modified — do not upgra
 ## Running the Pipeline
 
 ```bash
-python main.py                  # full pipeline → tracking.rrd + showcase.mp4
+python main.py                  # full pipeline → tracking.rrd + showcase.mp4 (pre-computed dets)
+python main.py --live           # same but with live PV-RCNN inference
 python evaluate.py              # CLEAR-MOT metrics vs KITTI ground truth
 python -m pytest tests/         # unit tests (no GPU or dataset needed)
 ruff check .                    # lint (configured in pyproject.toml)
 ```
 
-Toggle Option A/B at the top of `main.py` to switch between pre-computed and live inference.
+All options are CLI flags (--detector, --score-threshold, --frames, --no-video, …);
+shared dataset/tracker options live in perception/cli.py so defaults exist in one place.
 
 ## Coding Guidelines
 

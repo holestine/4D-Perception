@@ -3,105 +3,125 @@
 
 Pipeline:
   1. Load a KITTI sequence (LiDAR, camera, calibration, pose) with either
-     pre-computed detections or a live OpenPCDet model.
+     pre-computed detections (default) or live OpenPCDet inference (--live).
   2. Run a SORT-style 3D Kalman filter tracker across every frame.
-  3. Visualize confirmed tracks with Rerun and/or export an MP4 video.
+  3. Visualize confirmed tracks with Rerun and export MP4 videos.
+
+    python main.py                          # pre-computed pvrcnn detections
+    python main.py --live                   # live PV-RCNN inference (GPU)
+    python main.py --detector casa --score-threshold -1.0
+    python main.py --frames 50 --no-video   # quick look at the first 50 frames
 """
 
+import argparse
 import time
 
 import numpy as np
 
-from perception.datasets.kitti import (  # noqa: F401 — KittiLabelSource is Option A
-    KittiLabelSource,
-    KittiSequence,
-)
-from perception.detections import OpenPCDetSource
-from perception.tracker.mot import Tracker3D
+from perception.cli import add_dataset_args, add_tracker_args, build_label_source, build_tracker
+from perception.datasets.kitti import KittiSequence
 from perception.visualization.rerun_vis import visualize_tracking
 from perception.visualization.video import create_tracking_video
 
-# ── Dataset ────────────────────────────────────────────────────────────────────
-DATA_ROOT  = "multi_object_tracking/data"
-SEQ_ID     = 8
 
-# Option A — pre-computed detections (default):
-#detections = KittiLabelSource("multi_object_tracking/detectors/pvrcnn", SEQ_ID, DATA_ROOT)
+def parse_args():
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    add_dataset_args(p)
+    add_tracker_args(p)
 
-# Option B — live PV-RCNN inference (requires OpenPCDet + model weights):
-from detector import OpenPCDetDetector
+    live = p.add_argument_group("live inference (--live)")
+    live.add_argument("--live", action="store_true",
+                      help="run PV-RCNN live instead of loading pre-computed detections")
+    live.add_argument("--cfg-file",   default="OpenPCDet/tools/cfgs/kitti_models/pv_rcnn.yaml")
+    live.add_argument("--checkpoint", default="models/PVRCNN/pv_rcnn_8369.pth")
 
-detections = OpenPCDetSource(OpenPCDetDetector(
-    cfg_file   = "OpenPCDet/tools/cfgs/kitti_models/pv_rcnn.yaml",
-    checkpoint = "models/PVRCNN/pv_rcnn_8369.pth",
-    data_root  = DATA_ROOT,
-))
-
-dataset = KittiSequence(DATA_ROOT, seq_id=SEQ_ID, detections=detections)
-
-
-# ── Tracker ────────────────────────────────────────────────────────────────────
-# Defaults tuned on seq 0008 with evaluate.py (MOTA 0.553 / IDF1 0.731 — see README);
-# single-sequence tuning, revisit when more sequences are available
-tracker = Tracker3D(config={
-    "score_threshold":        0.5,
-    "min_hits":               2,
-    "max_missed":             3,
-    "dist_threshold":         4.5,
-    "velocity_process_noise": 1.0,
-})
+    vis = p.add_argument_group("visualization")
+    vis.add_argument("--frames", type=int, default=None,
+                     help="only process the first N frames (default: all)")
+    vis.add_argument("--show-unconfirmed-above", type=float, default=4.0,
+                     help="also draw unconfirmed detections scoring above this "
+                          "(raw-logit scale; sigmoid scores never exceed it)")
+    vis.add_argument("--no-rrd",   action="store_true", help="skip the Rerun .rrd export")
+    vis.add_argument("--no-video", action="store_true", help="skip the MP4 exports")
+    vis.add_argument("--showcase-frames", type=int, nargs=2, default=(205, 265),
+                     metavar=("START", "END"), help="frame range for showcase.mp4")
+    vis.add_argument("--showcase-fps", type=int, default=5)
+    return p.parse_args()
 
 
-# ── Tracking loop ──────────────────────────────────────────────────────────────
-frame_indices = range(len(dataset))
+def main():
+    args = parse_args()
 
-final_bbs     = []
-final_ids     = []
-final_det_ids = []
+    if args.live:
+        from detector import OpenPCDetDetector
+        from perception.detections import OpenPCDetSource
+        detections = OpenPCDetSource(OpenPCDetDetector(
+            cfg_file=args.cfg_file, checkpoint=args.checkpoint, data_root=args.data_root,
+        ))
+    else:
+        detections = build_label_source(args)
 
-elapsed = 0.0
-for i in frame_indices:
-    frame = dataset[i]
+    dataset = KittiSequence(args.data_root, seq_id=args.seq, detections=detections)
+    tracker = build_tracker(args)
 
-    t0 = time.perf_counter()
-    ids, bbs, _, det_ids = tracker.update(
-        frame.detections.boxes,
-        frame.detections.scores,
-        pose=frame.ego_pose,
-        names=frame.detections.names,
-    )
-    elapsed += time.perf_counter() - t0
+    n_frames      = len(dataset) if args.frames is None else min(args.frames, len(dataset))
+    frame_indices = range(n_frames)
 
-    final_bbs.append(np.array(bbs) if bbs else np.zeros((0, 7)))
-    final_ids.append(ids)
-    final_det_ids.append(det_ids)
+    # ── Tracking loop ──────────────────────────────────────────────────────────
+    final_bbs     = []
+    final_ids     = []
+    final_det_ids = []
 
-n = len(frame_indices)
-print(f"Tracked {n} frames in {elapsed:.2f}s  ({n / elapsed:.1f} fps)")
+    elapsed = 0.0
+    for i in frame_indices:
+        frame = dataset[i]
+
+        t0 = time.perf_counter()
+        ids, bbs, _, det_ids = tracker.update(
+            frame.detections.boxes,
+            frame.detections.scores,
+            pose=frame.ego_pose,
+            names=frame.detections.names,
+        )
+        elapsed += time.perf_counter() - t0
+
+        final_bbs.append(np.array(bbs) if bbs else np.zeros((0, 7)))
+        final_ids.append(ids)
+        final_det_ids.append(det_ids)
+
+    print(f"Tracked {n_frames} frames in {elapsed:.2f}s  ({n_frames / elapsed:.1f} fps)")
+
+    # ── Visualization ──────────────────────────────────────────────────────────
+    if not args.no_rrd:
+        visualize_tracking(
+            dataset,
+            frame_indices,
+            final_det_ids,
+            show_unconfirmed_above=args.show_unconfirmed_above,
+            out_file="tracking.rrd",
+        )
+
+    if not args.no_video:
+        create_tracking_video(
+            dataset,
+            frame_indices,
+            final_det_ids,
+            show_unconfirmed_above=args.show_unconfirmed_above,
+            out_file="tracking.mp4",
+        )
+
+        start, end = args.showcase_frames
+        if start < n_frames:
+            create_tracking_video(
+                dataset,
+                range(start, min(end, n_frames)),
+                final_det_ids,
+                show_unconfirmed_above=args.show_unconfirmed_above,
+                fps=args.showcase_fps,
+                out_file="showcase.mp4",
+            )
 
 
-# ── Visualization ──────────────────────────────────────────────────────────────
-visualize_tracking(
-    dataset,
-    frame_indices,
-    final_det_ids,
-    threshold=4,
-    out_file="tracking.rrd",
-)
-
-create_tracking_video(
-    dataset,
-    frame_indices,
-    final_det_ids,
-    threshold=4,
-    out_file="tracking.mp4",
-)
-
-create_tracking_video(
-    dataset,
-    range(205, 265),
-    final_det_ids,
-    threshold=4,
-    fps=5,
-    out_file="showcase.mp4",
-)
+if __name__ == "__main__":
+    main()
