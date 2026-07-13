@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
-from multi_object_tracking.tracker.box_op import convert_bbs_type, register_bbs
+from perception.boxes import register_bbs
 from perception.tracker.track import Obstacle3D
 
 
@@ -28,7 +28,6 @@ class Tracker3D:
             max_missed      (int)    frames before a track is dropped (default 3)
             min_hits        (int)    consecutive detections to confirm (default 3)
             score_threshold (float)  minimum score fed to tracker (default 0.5)
-            box_type        (str)    'Kitti', 'OpenPCDet', or 'Waymo' (default 'Kitti')
             velocity_process_noise (float)  Q-scale for vx,vy,vz (default 1.0)
         """
         config = config or {}
@@ -36,7 +35,6 @@ class Tracker3D:
         self.max_missed             = config.get("max_missed",             3)
         self.min_hits               = config.get("min_hits",               3)
         self.score_threshold        = config.get("score_threshold",        0.5)
-        self.box_type               = config.get("box_type",               "Kitti")
         self.velocity_process_noise = config.get("velocity_process_noise", 1.0)
 
         self.trajectories:   list[Obstacle3D] = []
@@ -94,7 +92,7 @@ class Tracker3D:
 
         Parameters
         ----------
-        boxes  : ndarray (M, 7)   detection boxes in box_type format
+        boxes  : ndarray (M, 7)   canonical [x, y, z, l, w, h, yaw] detection boxes
         scores : ndarray (M,)     confidence scores
         pose   : ndarray (4, 4)   optional ego-vehicle pose for world-frame tracking
 
@@ -109,8 +107,8 @@ class Tracker3D:
         n = len(boxes)
 
         if n > 0:
-            boxes = convert_bbs_type(boxes, self.box_type)
-            boxes = register_bbs(boxes, pose)
+            # copy: register_bbs works in place and callers keep their boxes
+            boxes = register_bbs(np.array(boxes, dtype=np.float64), pose)
 
         det_to_track_id = self._associate(boxes, scores)
 

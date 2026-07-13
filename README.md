@@ -188,17 +188,18 @@ Edit the top of `main.py` to switch between pre-computed and live detection:
 
 ```python
 # Option A — pre-computed (fast, no GPU required):
-LABEL_PATH = "multi_object_tracking/detectors/pvrcnn"   # or casa, second_iou, point_rcnn
-dataset = KittiDetectionDataset(DATA_ROOT, seq_id=8, label_path=LABEL_PATH)
+#   label root: multi_object_tracking/detectors/pvrcnn (or casa, second_iou, point_rcnn)
+detections = KittiLabelSource("multi_object_tracking/detectors/pvrcnn", SEQ_ID, DATA_ROOT)
 
 # Option B — live PV-RCNN inference:
 from detector import OpenPCDetDetector
-det = OpenPCDetDetector(
+detections = OpenPCDetSource(OpenPCDetDetector(
     cfg_file   = "OpenPCDet/tools/cfgs/kitti_models/pv_rcnn.yaml",
     checkpoint = "models/PVRCNN/pv_rcnn_8369.pth",
     data_root  = DATA_ROOT,
-)
-dataset = KittiDetectionDataset(DATA_ROOT, seq_id=8, detector=det)
+))
+
+dataset = KittiSequence(DATA_ROOT, seq_id=SEQ_ID, detections=detections)
 ```
 
 Tracker hyperparameters in `main.py`:
@@ -217,24 +218,29 @@ Tracker hyperparameters in `main.py`:
 
 ```
 perception/                   Core library
-  datasets/kitti.py           KittiDetectionDataset — loads LiDAR, camera, calibration, detections
+  boxes.py                    Canonical box format [x,y,z,l,w,h,yaw] + conversions
+  frame.py                    Frame / Camera / Detections — dataset-agnostic data model
+  detections.py               DetectionSource interface + live OpenPCDetSource
+  assets/car.obj              3D car mesh for visualization
+  datasets/
+    base.py                   SequenceDataset interface
+    kitti.py                  KittiSequence adapter + KittiLabelSource (pre-computed files)
+    kitti_io.py               Low-level KITTI I/O (calibration, LiDAR, images, poses)
   tracker/
     track.py                  Obstacle3D — per-track Kalman filter
     mot.py                    Tracker3D — Hungarian assignment + track lifecycle
   visualization/
-    geometry.py               project_3d_box_to_image
+    geometry.py               project_box_to_image
     rerun_vis.py              Rerun SDK visualization
     video.py                  MP4 export with dual camera/LiDAR panels
 
+tests/                        Unit tests (pytest)
 main.py                       Entry point
 detector.py                   OpenPCDet live inference wrapper (model-agnostic)
 requirements.txt
 
-multi_object_tracking/        Reference implementations + data (external repo)
-  dataset/kitti_data_base.py  Low-level KITTI I/O
-  tracker/box_op.py           Box format conversion and ego-pose registration
+multi_object_tracking/        Data only (not tracked in git)
   detectors/                  Pre-computed detections: pvrcnn/, casa/, second_iou/, point_rcnn/
-  viewer/car.obj              3D car mesh for visualization
   data/                       Raw KITTI sequences
 
 models/

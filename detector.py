@@ -22,9 +22,10 @@ Example:
 """
 
 import sys
+from pathlib import Path
+
 import numpy as np
 import torch
-from pathlib import Path
 
 # Use the local OpenPCDet source so all Python wrappers around compiled ops are present
 _HERE = Path(__file__).resolve().parent
@@ -35,13 +36,7 @@ from pcdet.datasets import DatasetTemplate
 from pcdet.models import build_network, load_data_to_gpu
 from pcdet.utils import common_utils
 
-
 _LABEL_MAP = {1: "Car", 2: "Pedestrian", 3: "Cyclist", 4: "Van"}
-
-
-def _limit_period(val, offset=0.5, period=np.pi):
-    """Wrap val into [-offset*period, (1-offset)*period]."""
-    return val - np.floor(val / period + offset) * period
 
 
 class _InferenceDataset(DatasetTemplate):
@@ -92,23 +87,23 @@ class OpenPCDetDetector:
         self._model.cuda()
         self._model.eval()
 
-    def detect_frame(self, velo_bin_path, P2, V2C, frame_id=0):
+    def detect_frame(self, points, frame_id=0):
         """
         Run detection on a single LiDAR frame.
 
+        OpenPCDet's [x, y, z, dx, dy, dz, heading] output is already the
+        canonical box format (see perception/boxes.py), so it is returned
+        as-is.
+
         Args:
-            velo_bin_path (str):     Path to the raw .bin point cloud file.
-            P2  (ndarray, 3×4):      Camera projection matrix from read_calib.
-            V2C (ndarray, 4×4):      LiDAR-to-camera transform from read_calib.
-            frame_id (int):          Frame index passed to the model (default 0).
+            points (ndarray): (N, 4) raw [x, y, z, intensity] LiDAR points.
+            frame_id (int):   Frame index passed to the model (default 0).
 
         Returns:
-            objects_lidar (ndarray): (M, 7) [h,w,l, x,y,z_bottom, ry] LiDAR frame.
-            objects_cam   (ndarray): (M, 7) [h,w,l, x,y_bottom,z, ry] camera frame.
-            scores        (ndarray): (M,) detection confidence scores.
-            names         (list):    (M,) class name strings.
+            boxes  (ndarray): (M, 7) [x, y, z_center, l, w, h, yaw] LiDAR frame.
+            scores (ndarray): (M,) detection confidence scores (sigmoid, 0-1).
+            names  (list):    (M,) class name strings.
         """
-        points = np.fromfile(velo_bin_path, dtype=np.float32).reshape(-1, 4)
         data_dict = self._dataset.prepare_data({"points": points, "frame_id": frame_id})
         batch = self._dataset.collate_batch([data_dict])
         load_data_to_gpu(batch)
@@ -116,44 +111,12 @@ class OpenPCDetDetector:
         with torch.no_grad():
             pred_dicts, _ = self._model.forward(batch)
 
-        bboxes = pred_dicts[0]["pred_boxes"].cpu().numpy()
+        boxes  = pred_dicts[0]["pred_boxes"].cpu().numpy()
         scores = pred_dicts[0]["pred_scores"].cpu().numpy()
         labels = pred_dicts[0]["pred_labels"].cpu().numpy()
 
         mask = scores >= self._score_threshold
-        bboxes, scores, labels = bboxes[mask], scores[mask], labels[mask]
+        boxes, scores, labels = boxes[mask], scores[mask], labels[mask]
 
-        if len(bboxes) == 0:
-            empty = np.zeros((0, 7), dtype=np.float32)
-            return empty, empty, np.zeros(0, dtype=np.float32), []
-
-        objects_lidar, objects_cam = self._to_kitti_format(bboxes, V2C)
         names = [_LABEL_MAP.get(int(l), "Car") for l in labels]
-        return objects_lidar, objects_cam, scores, names
-
-    def _to_kitti_format(self, bboxes, V2C):
-        """
-        Convert OpenPCDet [x,y,z,dx,dy,dz,heading] → KITTI [h,w,l, x,y,z_bottom, ry].
-
-        OpenPCDet: LiDAR frame (x=fwd, y=left, z=up), box centres.
-        KITTI:     camera frame (x=right, y=down, z=fwd), y at bottom face.
-        """
-        n = len(bboxes)
-        objects_lidar = np.zeros((n, 7), dtype=np.float32)
-        objects_cam   = np.zeros((n, 7), dtype=np.float32)
-
-        for i, (x_l, y_l, z_l, dx, dy, dz, heading) in enumerate(bboxes):
-            h, w, l = dz, dy, dx
-            ry = _limit_period(-heading - np.pi / 2, period=2 * np.pi)
-
-            x_c, y_c, z_c = (V2C @ np.array([x_l, y_l, z_l, 1.0], dtype=np.float64))[:3]
-
-            # Camera y increases downward; KITTI stores y at the bottom face
-            y_c_bottom = y_c + h / 2
-            # LiDAR z increases upward; bottom face is centre minus half-height
-            z_l_bottom = z_l - h / 2
-
-            objects_lidar[i] = [h, w, l, x_l, y_l, z_l_bottom, ry]
-            objects_cam[i]   = [h, w, l, x_c, y_c_bottom, z_c, ry]
-
-        return objects_lidar, objects_cam
+        return boxes.astype(np.float32), scores, names

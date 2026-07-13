@@ -1,0 +1,17 @@
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+extend-exclude = ["OpenPCDet", "multi_object_tracking"]
+
+[tool.ruff.lint]
+# pycodestyle errors, pyflakes, and import sorting; formatting is left alone
+# so the codebase's aligned-assignment style survives
+select = ["E4", "E7", "E9", "F", "I"]
+# l (box length) is core domain vocabulary: [x, y, z, l, w, h, yaw]
+ignore = ["E741"]
+
+[tool.ruff.lint.per-file-ignores]
+# pcdet imports must follow the sys.path insert for the local OpenPCDet tree
+"detector.py" = ["E402"]
+# Option B's detector import lives in its toggle block, not at the top
+"main.py" = ["E402"]

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
@@ -5,9 +7,10 @@ import rerun as rr
 import rerun.blueprint as rrb
 from scipy.spatial.transform import Rotation as R
 
-from perception.visualization.geometry import project_3d_box_to_image
+from perception.boxes import BOX_EDGES
+from perception.visualization.geometry import project_box_to_image
 
-_CAR_OBJ        = "multi_object_tracking/viewer/car.obj"
+_CAR_OBJ        = str(Path(__file__).resolve().parents[1] / "assets" / "car.obj")
 _CAR_SCALE      = [0.5, 0.5, 0.5]   # ego vehicle: 0.5× native OBJ size
 _OBJ_NATIVE     = np.array([8.95, 3.71, 2.97], dtype=np.float32)
 _VEHICLE_CLASSES = {"Car", "Van", "Truck"}
@@ -51,7 +54,7 @@ def visualize_tracking(dataset, frames, final_det_ids, threshold=4, out_file=Non
 
     Parameters
     ----------
-    dataset        : KittiDetectionDataset
+    dataset        : SequenceDataset
     frames         : iterable of int  frame indices to visualize
     final_det_ids  : list[ndarray]    per-frame confirmed track IDs from the tracking loop
     threshold      : float            minimum score for unconfirmed detections (default 4)
@@ -81,14 +84,14 @@ def visualize_tracking(dataset, frames, final_det_ids, threshold=4, out_file=Non
         rr.log("world/ego_vehicle/camera/image/detections", rr.Clear(recursive=True))
         rr.log("world/ego_vehicle/lidar/points",            rr.Clear(recursive=False))
 
-        data = dataset[i]
-        pose          = data["pose"]
-        P2            = data["P2"]
-        points        = data["points"]
-        image         = data["image"]
-        objects_lidar = data["objects"]
-        objects_cam   = data["objects_cam"]
-        det_scores    = data["scores"]
+        frame = dataset[i]
+        pose       = frame.ego_pose
+        P2         = frame.camera.projection
+        V2C        = frame.camera.lidar_to_cam
+        points     = frame.points
+        image      = frame.image
+        boxes      = frame.detections.boxes
+        det_scores = frame.detections.scores
 
         # ── Ego vehicle ───────────────────────────────────────────────────────
         if pose is not None:
@@ -121,42 +124,32 @@ def visualize_tracking(dataset, frames, final_det_ids, threshold=4, out_file=Non
         confirmed_mask = final_det_ids[i] > 0
         score_mask     = det_scores > threshold
         vis_mask       = confirmed_mask | score_mask
-        objects_cam_v  = objects_cam[vis_mask]
-        objects_lid_v  = np.array(objects_lidar)[vis_mask]
+        boxes_v        = np.array(boxes)[vis_mask]
         det_ids        = final_det_ids[i][vis_mask]
-        names_v        = np.array(data["names"])[vis_mask]
+        names_v        = np.array(frame.detections.names)[vis_mask]
 
         detected_boxes: list[tuple] = []
         curr_active:    set[int]    = set()
 
-        box_edges = [
-            [0, 1], [1, 2], [2, 3], [3, 0],
-            [4, 5], [5, 6], [6, 7], [7, 4],
-            [0, 4], [1, 5], [2, 6], [3, 7],
-        ]
-
-        for obj_cam, obj_lid, track_id, name in zip(
-            objects_cam_v, objects_lid_v, det_ids, names_v
-        ):
+        for box, track_id, name in zip(boxes_v, det_ids, names_v):
             if track_id == 0:
                 continue
 
             color = (np.array(cmap(track_id % cmap.N)) * 255).astype(np.uint8)
 
-            corners_2d = project_3d_box_to_image(obj_cam, P2, image.shape)
+            corners_2d = project_box_to_image(box, V2C, P2, image.shape)
             if corners_2d is not None:
-                lines = [np.array([corners_2d[s], corners_2d[e]]) for s, e in box_edges]
+                lines = [np.array([corners_2d[s], corners_2d[e]]) for s, e in BOX_EDGES]
                 rr.log(
                     f"world/ego_vehicle/camera/image/detections/box_{track_id}",
                     rr.LineStrips2D(lines, labels=[f"{track_id}"], colors=np.array(color)),
                 )
 
-            h, w, l, x, y, z, ry = obj_lid.tolist()
+            x, y, z, l, w, h, yaw = box.tolist()
             if l * w * h == 0:
                 continue
 
-            yaw    = -ry - np.pi / 2
-            center = np.array([x, y, z + h / 2])
+            center = np.array([x, y, z])
             quat   = R.from_euler("z", yaw, degrees=False).as_quat()
             detected_boxes.append((center, l, w, h, yaw))
 

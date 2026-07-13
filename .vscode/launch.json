@@ -11,5 +11,22 @@
             "program": "${file}",
             "console": "integratedTerminal"
         },
+        {
+            "name": "Python Debugger: MOT",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "main.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Python: Unit Tests",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": ["tests/", "-v"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
     ]
 }

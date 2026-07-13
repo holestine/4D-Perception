@@ -12,28 +12,32 @@ import time
 
 import numpy as np
 
-from perception.datasets.kitti import KittiDetectionDataset
+from perception.datasets.kitti import (  # noqa: F401 — KittiLabelSource is Option A
+    KittiLabelSource,
+    KittiSequence,
+)
+from perception.detections import OpenPCDetSource
 from perception.tracker.mot import Tracker3D
 from perception.visualization.rerun_vis import visualize_tracking
 from perception.visualization.video import create_tracking_video
-
 
 # ── Dataset ────────────────────────────────────────────────────────────────────
 DATA_ROOT  = "multi_object_tracking/data"
 SEQ_ID     = 8
 
 # Option A — pre-computed detections (default):
-#LABEL_PATH = "multi_object_tracking/detectors/pvrcnn"
-#dataset = KittiDetectionDataset(DATA_ROOT, seq_id=SEQ_ID, label_path=LABEL_PATH)
+#detections = KittiLabelSource("multi_object_tracking/detectors/pvrcnn", SEQ_ID, DATA_ROOT)
 
 # Option B — live PV-RCNN inference (requires OpenPCDet + model weights):
 from detector import OpenPCDetDetector
-det = OpenPCDetDetector(
+
+detections = OpenPCDetSource(OpenPCDetDetector(
     cfg_file   = "OpenPCDet/tools/cfgs/kitti_models/pv_rcnn.yaml",
     checkpoint = "models/PVRCNN/pv_rcnn_8369.pth",
     data_root  = DATA_ROOT,
-)
-dataset = KittiDetectionDataset(DATA_ROOT, seq_id=SEQ_ID, detector=det)
+))
+
+dataset = KittiSequence(DATA_ROOT, seq_id=SEQ_ID, detections=detections)
 
 
 # ── Tracker ────────────────────────────────────────────────────────────────────
@@ -47,27 +51,27 @@ tracker = Tracker3D(config={
 
 
 # ── Tracking loop ──────────────────────────────────────────────────────────────
-all_frames = range(len(dataset))
+frame_indices = range(len(dataset))
 
 final_bbs     = []
 final_ids     = []
 final_det_ids = []
 
 elapsed = 0.0
-for i in all_frames:
-    data = dataset[i]
+for i in frame_indices:
+    frame = dataset[i]
 
-    scores  = np.array(data["scores"], dtype=float)
-    objects = data["objects"]
+    scores = np.array(frame.detections.scores, dtype=float)
+    boxes  = frame.detections.boxes
 
-    full_n           = len(scores)
-    mask             = scores > tracker.score_threshold
-    filtered_objects = objects[mask, :7]
-    filtered_scores  = scores[mask]
+    full_n          = len(scores)
+    mask            = scores > tracker.score_threshold
+    filtered_boxes  = boxes[mask, :7]
+    filtered_scores = scores[mask]
 
     t0 = time.perf_counter()
     ids, bbs, _, filtered_det_ids = tracker.update(
-        filtered_objects, filtered_scores, pose=data["pose"]
+        filtered_boxes, filtered_scores, pose=frame.ego_pose
     )
     elapsed += time.perf_counter() - t0
 
@@ -78,14 +82,14 @@ for i in all_frames:
     final_ids.append(ids)
     final_det_ids.append(det_ids)
 
-n = len(all_frames)
+n = len(frame_indices)
 print(f"Tracked {n} frames in {elapsed:.2f}s  ({n / elapsed:.1f} fps)")
 
 
 # ── Visualization ──────────────────────────────────────────────────────────────
 visualize_tracking(
     dataset,
-    all_frames,
+    frame_indices,
     final_det_ids,
     threshold=4,
     out_file="tracking.rrd",
@@ -93,7 +97,7 @@ visualize_tracking(
 
 create_tracking_video(
     dataset,
-    all_frames,
+    frame_indices,
     final_det_ids,
     threshold=4,
     out_file="tracking.mp4",

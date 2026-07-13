@@ -1,18 +1,15 @@
+from pathlib import Path
+
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 
-from perception.visualization.geometry import project_3d_box_to_image
+from perception.boxes import BOX_EDGES
+from perception.visualization.geometry import project_box_to_image
 
-_CAR_OBJ         = "multi_object_tracking/viewer/car.obj"
+_CAR_OBJ         = str(Path(__file__).resolve().parents[1] / "assets" / "car.obj")
 _OBJ_NATIVE      = np.array([8.95, 3.71, 2.97], dtype=np.float32)
 _VEHICLE_CLASSES = {"Car", "Van", "Truck"}
-
-_BOX_EDGES = [
-    (0,1),(1,2),(2,3),(3,0),
-    (4,5),(5,6),(6,7),(7,4),
-    (0,4),(1,5),(2,6),(3,7),
-]
 
 
 def _load_obj_crease_edges(path, crease_angle_deg=50):
@@ -88,7 +85,7 @@ def create_tracking_video(
 
     Parameters
     ----------
-    dataset        : KittiDetectionDataset
+    dataset        : SequenceDataset
     frames         : iterable of int
     final_det_ids  : list[ndarray]   per-frame confirmed track IDs
     threshold      : float           minimum score for unconfirmed detections
@@ -102,7 +99,7 @@ def create_tracking_video(
 
     obj_verts, obj_edges = _load_obj_crease_edges(_CAR_OBJ, crease_angle_deg=50)
 
-    first_img      = dataset[frames[0]]["image"]
+    first_img      = dataset[frames[0]].image
     src_h, src_w   = first_img.shape[:2]
     cam_w          = int(src_w * H / src_h)
 
@@ -113,35 +110,33 @@ def create_tracking_video(
 
     print(f"Rendering {len(frames)} frames to '{out_file}' …")
     for idx, i in enumerate(frames):
-        data = dataset[i]
+        frame = dataset[i]
 
-        P2            = data["P2"]
-        V2C           = data["V2C"]
-        points        = data["points"]
-        image         = data["image"]
-        objects_cam   = data["objects_cam"]
-        objects_lidar = data["objects"]
-        det_scores    = data["scores"]
+        P2         = frame.camera.projection
+        V2C        = frame.camera.lidar_to_cam
+        points     = frame.points
+        image      = frame.image
+        boxes      = frame.detections.boxes
+        det_scores = frame.detections.scores
 
         confirmed_mask = final_det_ids[i] > 0
         score_mask     = det_scores > threshold
         vis_mask       = confirmed_mask | score_mask
 
-        objects_cam_v = objects_cam[vis_mask]
-        objects_lid_v = np.array(objects_lidar)[vis_mask]
-        det_ids       = final_det_ids[i][vis_mask]
-        names_v       = np.array(data["names"])[vis_mask]
+        boxes_v = np.array(boxes)[vis_mask]
+        det_ids = final_det_ids[i][vis_mask]
+        names_v = np.array(frame.detections.names)[vis_mask]
 
         def _draw_boxes(img):
-            for obj_cam, track_id in zip(objects_cam_v, det_ids):
+            for box, track_id in zip(boxes_v, det_ids):
                 if track_id == 0:
                     continue
                 color = (np.array(cmap(track_id % cmap.N)) * 255).astype(np.uint8)
                 bgr   = (int(color[2]), int(color[1]), int(color[0]))
-                corners_2d = project_3d_box_to_image(obj_cam, P2, image.shape)
+                corners_2d = project_box_to_image(box, V2C, P2, image.shape)
                 if corners_2d is None:
                     continue
-                for s, e in _BOX_EDGES:
+                for s, e in BOX_EDGES:
                     cv2.line(img,
                              tuple(corners_2d[s].astype(int)),
                              tuple(corners_2d[e].astype(int)),
@@ -176,26 +171,23 @@ def create_tracking_video(
         lidar_img[py, px, 1] = rgba[:, 1]
         lidar_img[py, px, 2] = rgba[:, 0]
 
-        for obj_cam, obj_lid, track_id, name in zip(
-            objects_cam_v, objects_lid_v, det_ids, names_v
-        ):
+        for box, track_id, name in zip(boxes_v, det_ids, names_v):
             if track_id == 0:
                 continue
             color = (np.array(cmap(track_id % cmap.N)) * 255).astype(np.uint8)
             bgr   = (int(color[2]), int(color[1]), int(color[0]))
-            h_b, w_b, l_b, x_b, y_b, z_b, ry = obj_lid.tolist()
+            x_b, y_b, z_b, l_b, w_b, h_b, yaw = box.tolist()
             if l_b * w_b * h_b <= 0:
                 continue
 
             if name in _VEHICLE_CLASSES:
                 # Project scaled OBJ crease-edge wireframe into the LiDAR depth panel
-                yaw      = -ry - np.pi / 2
                 c_y, s_y = np.cos(yaw), np.sin(yaw)
                 v3d      = obj_verts * (np.array([l_b, w_b, h_b]) / _OBJ_NATIVE)
                 R_z      = np.array([[c_y, -s_y, 0.0], [s_y, c_y, 0.0], [0.0, 0.0, 1.0]],
                                     dtype=np.float32)
                 v3d  = v3d @ R_z.T
-                v3d += np.array([x_b, y_b, z_b + h_b / 2], dtype=np.float32)
+                v3d += np.array([x_b, y_b, z_b], dtype=np.float32)
                 v_hom = np.hstack([v3d, np.ones((len(v3d), 1))])
                 v_cam = (V2C @ v_hom.T).T
                 v_img = (P2 @ v_cam.T).T
@@ -211,9 +203,9 @@ def create_tracking_video(
                              bgr, 1, cv2.LINE_AA)
             else:
                 # Cyclist / Pedestrian — project the 3D box corners (same as camera panel)
-                corners_2d = project_3d_box_to_image(obj_cam, P2, lidar_img.shape)
+                corners_2d = project_box_to_image(box, V2C, P2, lidar_img.shape)
                 if corners_2d is not None:
-                    for s, e in _BOX_EDGES:
+                    for s, e in BOX_EDGES:
                         cv2.line(lidar_img,
                                  tuple(corners_2d[s].astype(int)),
                                  tuple(corners_2d[e].astype(int)),
