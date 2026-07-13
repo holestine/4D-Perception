@@ -41,11 +41,13 @@ dataset = KittiSequence(DATA_ROOT, seq_id=SEQ_ID, detections=detections)
 
 
 # ── Tracker ────────────────────────────────────────────────────────────────────
+# Defaults tuned on seq 0008 with evaluate.py (MOTA 0.553 / IDF1 0.731 — see README);
+# single-sequence tuning, revisit when more sequences are available
 tracker = Tracker3D(config={
     "score_threshold":        0.5,
-    "min_hits":               3,
-    "max_missed":             5,
-    "dist_threshold":         6.0,
+    "min_hits":               2,
+    "max_missed":             3,
+    "dist_threshold":         4.5,
     "velocity_process_noise": 1.0,
 })
 
@@ -61,22 +63,14 @@ elapsed = 0.0
 for i in frame_indices:
     frame = dataset[i]
 
-    scores = np.array(frame.detections.scores, dtype=float)
-    boxes  = frame.detections.boxes
-
-    full_n          = len(scores)
-    mask            = scores > tracker.score_threshold
-    filtered_boxes  = boxes[mask, :7]
-    filtered_scores = scores[mask]
-
     t0 = time.perf_counter()
-    ids, bbs, _, filtered_det_ids = tracker.update(
-        filtered_boxes, filtered_scores, pose=frame.ego_pose
+    ids, bbs, _, det_ids = tracker.update(
+        frame.detections.boxes,
+        frame.detections.scores,
+        pose=frame.ego_pose,
+        names=frame.detections.names,
     )
     elapsed += time.perf_counter() - t0
-
-    det_ids       = np.zeros(full_n, dtype=int)
-    det_ids[mask] = filtered_det_ids
 
     final_bbs.append(np.array(bbs) if bbs else np.zeros((0, 7)))
     final_ids.append(ids)

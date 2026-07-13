@@ -144,8 +144,10 @@ so the same `score_threshold` value means different things.
 - Matching: BEV centre distance in the world frame, 2 m gate (nuScenes-style) — GT boxes go
   through the same `kitti_camera_to_lidar` + `register_bbs` path as detections
 - GT classes evaluated: Car, Van, Truck (the tracker is class-agnostic; DontCare dropped)
-- Baseline, seq 0008, default tracker: pvrcnn@0.5 → MOTA 0.520, MOTP 0.256 m, IDF1 0.713,
-  0 ID switches, FP 106, FN 551 / 1369 GT boxes. casa@−1.0 → MOTA 0.468, 5 switches.
+- Current numbers, seq 0008, tuned defaults (min_hits=2, max_missed=3, gate=4.5):
+  pvrcnn@0.5 → MOTA 0.553, IDF1 0.731, 1 switch, FP 82, FN 529 / 1369, MT 15/27.
+  casa@−1.0 → MOTA 0.533, IDF1 0.724. Pre-tuning (min_hits=3, max_missed=5, gate=6.0)
+  scored 0.520 / 0.468. `--gate 3.0` reaches 0.560 but is single-sequence tuning.
   FN-dominated: most lost GT is distant/occluded vehicles the detector misses at these thresholds.
 
 ### Tracker (3D SORT)
@@ -153,11 +155,20 @@ so the same `score_threshold` value means different things.
 - 7-dimensional measurement vector: `[x, y, z, l, w, h, yaw]`
 - Mahalanobis distance cost matrix using per-track innovation covariance `S = H P Hᵀ + R`
 - Hungarian algorithm association with configurable distance threshold
+- **Class-gated association**: detections only match tracks from the same class group
+  (`DEFAULT_CLASS_GROUPS`: {Car, Van, Truck}, {Pedestrian}, {Cyclist}); vehicles share a group
+  because detectors flip labels on the same object. `names=None` disables gating.
+- `update(boxes, scores, pose, names)` takes the **full** detection set and filters by
+  `score_threshold` internally; returned `det_ids` covers every input detection (0 = unconfirmed)
+- Track IDs are assigned by the tracker instance (`_next_id`), not a class-level counter
+- `dt` config parameter for the motion model (default 0.1 s = 10 Hz KITTI; nuScenes keyframes are 2 Hz)
 - Tunable `velocity_process_noise` parameter to control Q-matrix aggressiveness
 - SORT-style lifecycle: `min_hits` to confirm a track, `max_missed` to prune stale tracks
 - **Persistent confirmation** via `_confirmed_ids` set: once a track reaches `min_hits`, it stays
   confirmed until evicted by `max_missed` — prevents large vehicles from flickering out when the
   detector misses a frame
+- Defaults `min_hits=2, max_missed=3, gate=4.5` tuned by sweep on seq 0008 (see Evaluation);
+  larger `max_missed` hurts MOTA here because coasting tracks emit predicted boxes counted as FP
 
 ### Coordinate Conventions
 - **Canonical box format** (everything inside `perception/`): `[x, y, z_center, l, w, h, yaw]` in

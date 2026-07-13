@@ -197,12 +197,17 @@ python evaluate.py --detector casa --score-threshold -1.0
 Confirmed tracks are matched to ground-truth vehicles (Car/Van/Truck) on
 bird's-eye-view centre distance (2 m gate, nuScenes-style) in the world frame.
 
-Baseline on sequence 0008 (pre-computed detections, default tracker settings):
+Results on sequence 0008 (pre-computed detections, tuned tracker defaults —
+`min_hits=2, max_missed=3, gate=4.5`, selected by parameter sweep with this harness):
 
-| Detector | MOTA | MOTP | IDF1 | ID sw. | FP | FN |
-|---|---|---|---|---|---|---|
-| `pvrcnn` @ 0.5 | **0.520** | 0.256 m | **0.713** | 0 | 106 | 551 |
-| `casa` @ −1.0 | 0.468 | 0.284 m | 0.682 | 5 | 185 | 538 |
+| Detector | MOTA | MOTP | IDF1 | ID sw. | FP | FN | MT |
+|---|---|---|---|---|---|---|---|
+| `pvrcnn` @ 0.5 | **0.553** | 0.284 m | **0.731** | 1 | 82 | 529 | 15/27 |
+| `casa` @ −1.0 | 0.533 | 0.251 m | 0.724 | 4 | 141 | 495 | 16/27 |
+
+(Pre-tuning defaults `min_hits=3, max_missed=5, gate=6.0` scored MOTA 0.520 / 0.468.
+A tighter `--gate 3.0` reaches MOTA 0.560 on this sequence but was left off the
+defaults — tuned on a single sequence, the χ²-principled 4.5 gate is safer.)
 
 ---
 
@@ -231,10 +236,12 @@ Tracker hyperparameters in `main.py`:
 | Parameter | Default | Effect |
 |---|---|---|
 | `score_threshold` | 0.5 | Detections below this are ignored (adjust per detector — see table above) |
-| `min_hits` | 3 | Consecutive detections to confirm a track |
-| `max_missed` | 5 | Missed frames before a track is pruned |
-| `dist_threshold` | 6.0 | Mahalanobis gate — increase for faster-moving or noisier scenes |
+| `min_hits` | 2 | Consecutive detections to confirm a track |
+| `max_missed` | 3 | Missed frames before a track is pruned |
+| `dist_threshold` | 4.5 | Mahalanobis gate — increase for faster-moving or noisier scenes |
 | `velocity_process_noise` | 1.0 | Higher = tracker adapts faster to acceleration |
+| `dt` | 0.1 | Seconds between frames (10 Hz KITTI; set 0.5 for nuScenes keyframes) |
+| `class_groups` | vehicles / peds / cyclists | Classes allowed to associate with each other |
 
 ---
 

@@ -26,7 +26,7 @@ def step(tracker, *boxes):
 class TestObstacle3D:
     def test_learns_constant_velocity(self):
         # target moves +1 m per 0.1 s frame → 10 m/s
-        obs = Obstacle3D(box(0.0), score=1.0)
+        obs = Obstacle3D(box(0.0), score=1.0, track_id=1)
         for k in range(1, 10):
             obs.predict()
             obs.update(box(float(k)), score=1.0)
@@ -34,7 +34,7 @@ class TestObstacle3D:
         assert predicted_x == pytest.approx(10.0, abs=1.0)
 
     def test_hit_streak_resets_on_miss(self):
-        obs = Obstacle3D(box(0.0), score=1.0)
+        obs = Obstacle3D(box(0.0), score=1.0, track_id=1)
         for k in (1.0, 2.0):
             obs.predict()
             obs.update(box(k), 1.0)
@@ -43,9 +43,17 @@ class TestObstacle3D:
         obs.predict()          # hit_streak resets once a miss is observed
         assert obs.hit_streak == 0
 
-    def test_unique_increasing_ids(self):
-        a, b = Obstacle3D(box(0), 1.0), Obstacle3D(box(5), 1.0)
-        assert b.id > a.id
+    def test_dt_scales_the_motion_model(self):
+        obs = Obstacle3D(box(0.0), score=1.0, track_id=1, dt=0.5)
+        np.testing.assert_allclose(obs.kf.F[0:3, 7:10], 0.5 * np.eye(3))
+
+    def test_tracker_assigns_unique_ids_per_instance(self):
+        # two trackers each start their own ID sequence at 1
+        for _ in range(2):
+            tracker = make_tracker()
+            _, _, _, _ = step(tracker, box(0.0, y=0.0), box(0.0, y=50.0))
+            ids = sorted(t.id for t in tracker.trajectories)
+            assert ids == [1, 2]
 
 
 class TestTrackerLifecycle:
@@ -131,3 +139,43 @@ class TestAssociation:
         pose[:3, 3] = [100.0, 0.0, 0.0]
         _, bbs, _, _ = tracker.update(np.array([box(5.0)]), np.ones(1), pose=pose)
         assert bbs[0][0] == pytest.approx(105.0, abs=1e-6)
+
+    def test_score_threshold_filters_inside_update(self):
+        tracker = make_tracker(score_threshold=0.5)
+        dets = np.array([box(0.0), box(0.0, y=20.0)])
+        ids, _, _, det_ids = tracker.update(dets, np.array([0.9, 0.3]))
+        assert len(tracker.trajectories) == 1        # low-score det never spawned
+        assert det_ids.shape == (2,)                 # but det_ids covers all inputs
+
+
+class TestClassGating:
+    def test_different_group_cannot_match(self):
+        tracker = make_tracker()
+        # confirm a Car track
+        for k in range(3):
+            step_named(tracker, (box(float(k)), "Car"))
+        n_tracks = len(tracker.trajectories)
+        # a Pedestrian at the same location must spawn, not update the car
+        step_named(tracker, (box(3.0), "Pedestrian"))
+        assert len(tracker.trajectories) == n_tracks + 1
+
+    def test_vehicle_classes_share_a_group(self):
+        tracker = make_tracker()
+        step_named(tracker, (box(0.0), "Car"))
+        track_id = tracker.trajectories[0].id
+        # detector relabels the same object as Van → must still match
+        _, _, _, det_ids = step_named(tracker, (box(1.0), "Van"))
+        assert det_ids[0] == track_id
+        assert len(tracker.trajectories) == 1
+
+    def test_no_names_means_no_gating(self):
+        tracker = make_tracker()
+        step(tracker, box(0.0))
+        _, _, _, det_ids = step(tracker, box(1.0))
+        assert det_ids[0] != 0
+
+
+def step_named(tracker, *dets):
+    boxes = np.array([b for b, _ in dets]) if dets else EMPTY
+    names = [n for _, n in dets]
+    return tracker.update(boxes, np.ones(len(boxes)), names=names)

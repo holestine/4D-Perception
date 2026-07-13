@@ -32,9 +32,9 @@ def parse_args():
     p.add_argument("--score-threshold",  type=float, default=0.5)
     p.add_argument("--dist-threshold",   type=float, default=2.0,
                    help="max BEV centre distance in metres for a GT match")
-    p.add_argument("--min-hits",   type=int,   default=3)
-    p.add_argument("--max-missed", type=int,   default=5)
-    p.add_argument("--gate",       type=float, default=6.0,
+    p.add_argument("--min-hits",   type=int,   default=2)
+    p.add_argument("--max-missed", type=int,   default=3)
+    p.add_argument("--gate",       type=float, default=4.5,
                    help="tracker Mahalanobis association gate")
     p.add_argument("--velocity-process-noise", type=float, default=1.0)
     return p.parse_args()
@@ -63,10 +63,9 @@ def main():
     def frames():
         for i in range(len(dataset)):
             frame = dataset[i]
-            scores = np.asarray(frame.detections.scores, dtype=float)
-            mask   = scores > tracker.score_threshold
             pred_ids, bbs, _, _ = tracker.update(
-                frame.detections.boxes[mask, :7], scores[mask], pose=frame.ego_pose
+                frame.detections.boxes, frame.detections.scores,
+                pose=frame.ego_pose, names=frame.detections.names,
             )
             pred_xy = np.array(bbs)[:, :2] if bbs else np.zeros((0, 2))
 
