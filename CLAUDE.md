@@ -32,6 +32,8 @@ perception/                   Our source code — all new code goes here
     track.py                  Obstacle3D (Kalman filter per track)
     mot.py                    Tracker3D (Hungarian assignment + lifecycle)
   visualization/
+    common.py                 shared vis constants/helpers: CAR_OBJ_PATH, MESH_CLASSES,
+                               track_color, select_visible
     geometry.py               project_box_to_image (canonical box → 2D corners)
     rerun_vis.py              visualize_tracking + _mask_points_outside_boxes
     video.py                  create_tracking_video + OBJ crease-edge loader

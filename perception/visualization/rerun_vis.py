@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,12 +6,16 @@ import rerun.blueprint as rrb
 from scipy.spatial.transform import Rotation as R
 
 from perception.boxes import BOX_EDGES
+from perception.visualization.common import (
+    CAR_OBJ_NATIVE_SIZE,
+    CAR_OBJ_PATH,
+    MESH_CLASSES,
+    select_visible,
+    track_color,
+)
 from perception.visualization.geometry import project_box_to_image
 
-_CAR_OBJ        = str(Path(__file__).resolve().parents[1] / "assets" / "car.obj")
-_CAR_SCALE      = [0.5, 0.5, 0.5]   # ego vehicle: 0.5× native OBJ size
-_OBJ_NATIVE     = np.array([8.95, 3.71, 2.97], dtype=np.float32)
-_VEHICLE_CLASSES = {"Car", "Van", "Truck"}
+_CAR_SCALE = [0.5, 0.5, 0.5]   # ego vehicle: 0.5× native OBJ size
 
 
 def _mask_points_outside_boxes(positions, boxes, margin=0.3):
@@ -74,7 +76,6 @@ def visualize_tracking(dataset, frames, final_det_ids, show_unconfirmed_above=4.
     rr.log("world/ego_vehicle/lidar/",  rr.ViewCoordinates.RIGHT_HAND_Z_UP)
 
     frames = list(frames)
-    cmap   = plt.get_cmap("tab20")
 
     logged_models: set[int] = set()
     prev_active:   set[int] = set()
@@ -87,13 +88,11 @@ def visualize_tracking(dataset, frames, final_det_ids, show_unconfirmed_above=4.
         rr.log("world/ego_vehicle/lidar/points",            rr.Clear(recursive=False))
 
         frame = dataset[i]
-        pose       = frame.ego_pose
-        P2         = frame.camera.projection
-        V2C        = frame.camera.lidar_to_cam
-        points     = frame.points
-        image      = frame.image
-        boxes      = frame.detections.boxes
-        det_scores = frame.detections.scores
+        pose   = frame.ego_pose
+        P2     = frame.camera.projection
+        V2C    = frame.camera.lidar_to_cam
+        points = frame.points
+        image  = frame.image
 
         # ── Ego vehicle ───────────────────────────────────────────────────────
         if pose is not None:
@@ -108,7 +107,7 @@ def visualize_tracking(dataset, frames, final_det_ids, show_unconfirmed_above=4.
                 rr.log("world/ego_vehicle/lidar/car_model",
                        rr.Transform3D(scale=_CAR_SCALE))
                 rr.log("world/ego_vehicle/lidar/car_model/mesh",
-                       rr.Asset3D(path=_CAR_OBJ))
+                       rr.Asset3D(path=CAR_OBJ_PATH))
                 ego_car_logged = True
 
         # ── Camera image ──────────────────────────────────────────────────────
@@ -123,12 +122,9 @@ def visualize_tracking(dataset, frames, final_det_ids, show_unconfirmed_above=4.
         colors    = (plt.cm.cividis(norm / 255.0)[:, :3] * 255).astype(np.uint8)
 
         # ── Per-detection visualisation ───────────────────────────────────────
-        confirmed_mask = final_det_ids[i] > 0
-        score_mask     = det_scores > show_unconfirmed_above
-        vis_mask       = confirmed_mask | score_mask
-        boxes_v        = np.array(boxes)[vis_mask]
-        det_ids        = final_det_ids[i][vis_mask]
-        names_v        = np.array(frame.detections.names)[vis_mask]
+        boxes_v, det_ids, names_v = select_visible(
+            frame.detections, final_det_ids[i], show_unconfirmed_above
+        )
 
         detected_boxes: list[tuple] = []
         curr_active:    set[int]    = set()
@@ -137,7 +133,7 @@ def visualize_tracking(dataset, frames, final_det_ids, show_unconfirmed_above=4.
             if track_id == 0:
                 continue
 
-            color = (np.array(cmap(track_id % cmap.N)) * 255).astype(np.uint8)
+            color = track_color(track_id)
 
             corners_2d = project_box_to_image(box, V2C, P2, image.shape)
             if corners_2d is not None:
@@ -157,16 +153,16 @@ def visualize_tracking(dataset, frames, final_det_ids, show_unconfirmed_above=4.
 
             entity = f"world/ego_vehicle/lidar/models/track_{track_id}"
 
-            if name in _VEHICLE_CLASSES:
+            if name in MESH_CLASSES:
                 rr.log(entity, rr.Transform3D(
                     translation=center,
                     quaternion=rr.Quaternion(xyzw=quat),
-                    scale=[l / _OBJ_NATIVE[0], w / _OBJ_NATIVE[1], h / _OBJ_NATIVE[2]],
+                    scale=list(np.array([l, w, h]) / CAR_OBJ_NATIVE_SIZE),
                     relation=rr.TransformRelation.ParentFromChild,
                 ))
                 if track_id not in logged_models:
                     rr.log(f"{entity}/model", rr.Asset3D(
-                        path=_CAR_OBJ, albedo_factor=color[:3] / 255.0,
+                        path=CAR_OBJ_PATH, albedo_factor=color[:3] / 255.0,
                     ))
                     logged_models.add(track_id)
             else:

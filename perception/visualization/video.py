@@ -1,15 +1,16 @@
-from pathlib import Path
-
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 
 from perception.boxes import BOX_EDGES
+from perception.visualization.common import (
+    CAR_OBJ_NATIVE_SIZE,
+    CAR_OBJ_PATH,
+    MESH_CLASSES,
+    select_visible,
+    track_color,
+)
 from perception.visualization.geometry import project_box_to_image
-
-_CAR_OBJ         = str(Path(__file__).resolve().parents[1] / "assets" / "car.obj")
-_OBJ_NATIVE      = np.array([8.95, 3.71, 2.97], dtype=np.float32)
-_VEHICLE_CLASSES = {"Car", "Van", "Truck"}
 
 
 def _load_obj_crease_edges(path, crease_angle_deg=50):
@@ -96,10 +97,9 @@ def create_tracking_video(
     output_height  : int             pixel height of each panel
     """
     frames = list(frames)
-    cmap   = plt.get_cmap("tab20")
     H      = output_height
 
-    obj_verts, obj_edges = _load_obj_crease_edges(_CAR_OBJ, crease_angle_deg=50)
+    obj_verts, obj_edges = _load_obj_crease_edges(CAR_OBJ_PATH, crease_angle_deg=50)
 
     first_img      = dataset[frames[0]].image
     src_h, src_w   = first_img.shape[:2]
@@ -114,26 +114,20 @@ def create_tracking_video(
     for idx, i in enumerate(frames):
         frame = dataset[i]
 
-        P2         = frame.camera.projection
-        V2C        = frame.camera.lidar_to_cam
-        points     = frame.points
-        image      = frame.image
-        boxes      = frame.detections.boxes
-        det_scores = frame.detections.scores
+        P2     = frame.camera.projection
+        V2C    = frame.camera.lidar_to_cam
+        points = frame.points
+        image  = frame.image
 
-        confirmed_mask = final_det_ids[i] > 0
-        score_mask     = det_scores > show_unconfirmed_above
-        vis_mask       = confirmed_mask | score_mask
-
-        boxes_v = np.array(boxes)[vis_mask]
-        det_ids = final_det_ids[i][vis_mask]
-        names_v = np.array(frame.detections.names)[vis_mask]
+        boxes_v, det_ids, names_v = select_visible(
+            frame.detections, final_det_ids[i], show_unconfirmed_above
+        )
 
         def _draw_boxes(img):
             for box, track_id in zip(boxes_v, det_ids):
                 if track_id == 0:
                     continue
-                color = (np.array(cmap(track_id % cmap.N)) * 255).astype(np.uint8)
+                color = track_color(track_id)
                 bgr   = (int(color[2]), int(color[1]), int(color[0]))
                 corners_2d = project_box_to_image(box, V2C, P2, image.shape)
                 if corners_2d is None:
@@ -176,16 +170,16 @@ def create_tracking_video(
         for box, track_id, name in zip(boxes_v, det_ids, names_v):
             if track_id == 0:
                 continue
-            color = (np.array(cmap(track_id % cmap.N)) * 255).astype(np.uint8)
+            color = track_color(track_id)
             bgr   = (int(color[2]), int(color[1]), int(color[0]))
             x_b, y_b, z_b, l_b, w_b, h_b, yaw = box.tolist()
             if l_b * w_b * h_b <= 0:
                 continue
 
-            if name in _VEHICLE_CLASSES:
+            if name in MESH_CLASSES:
                 # Project scaled OBJ crease-edge wireframe into the LiDAR depth panel
                 c_y, s_y = np.cos(yaw), np.sin(yaw)
-                v3d      = obj_verts * (np.array([l_b, w_b, h_b]) / _OBJ_NATIVE)
+                v3d      = obj_verts * (np.array([l_b, w_b, h_b]) / CAR_OBJ_NATIVE_SIZE)
                 R_z      = np.array([[c_y, -s_y, 0.0], [s_y, c_y, 0.0], [0.0, 0.0, 1.0]],
                                     dtype=np.float32)
                 v3d  = v3d @ R_z.T
