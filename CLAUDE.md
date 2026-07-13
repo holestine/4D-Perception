@@ -35,14 +35,16 @@ perception/                   Our source code — all new code goes here
     geometry.py               project_box_to_image (canonical box → 2D corners)
     rerun_vis.py              visualize_tracking + _mask_points_outside_boxes
     video.py                  create_tracking_video + OBJ crease-edge loader
+  evaluation.py               read_tracking_labels + evaluate_tracking (CLEAR-MOT via motmetrics)
 
 tests/                        Unit tests — run with `python -m pytest tests/`
 main.py                       Entry point (~75 lines): dataset, tracker, loop, visualizers
+evaluate.py                   Evaluation entry point (argparse; detector/threshold/gate options)
 detector.py                   OpenPCDet live detector wrapper (model-agnostic)
 
 multi_object_tracking/        Data only, gitignored (code was ported into perception/ in July 2026)
   detectors/                  Pre-computed detection .txt files: pvrcnn/, casa/, second_iou/, point_rcnn/
-  data/                       Raw KITTI data: velodyne/, image_02/, calib/, pose/
+  data/                       Raw KITTI data: velodyne/, image_02/, calib/, pose/, label_02/ (GT)
 
 models/
   PointRCNN/pointrcnn_7870.pth
@@ -55,6 +57,7 @@ OpenPCDet/                    Cloned OpenPCDet source (modified — do not upgra
 
 ```bash
 python main.py                  # full pipeline → tracking.rrd + showcase.mp4
+python evaluate.py              # CLEAR-MOT metrics vs KITTI ground truth
 python -m pytest tests/         # unit tests (no GPU or dataset needed)
 ruff check .                    # lint (configured in pyproject.toml)
 ```
@@ -134,6 +137,16 @@ so the same `score_threshold` value means different things.
   the FOV-cropped cloud used for visualization — don't feed the cropped one to a detector
 - **Adding Waymo/nuScenes** = one new adapter producing Frames + (optionally) a file-based
   DetectionSource for that dataset's pre-computed detections; tracker and visualizers are untouched
+
+### Evaluation
+- `evaluate.py` runs the tracker and scores confirmed tracks against KITTI tracking ground truth
+  (`data/label_02/<seq>.txt`) with CLEAR-MOT metrics (motmetrics package)
+- Matching: BEV centre distance in the world frame, 2 m gate (nuScenes-style) — GT boxes go
+  through the same `kitti_camera_to_lidar` + `register_bbs` path as detections
+- GT classes evaluated: Car, Van, Truck (the tracker is class-agnostic; DontCare dropped)
+- Baseline, seq 0008, default tracker: pvrcnn@0.5 → MOTA 0.520, MOTP 0.256 m, IDF1 0.713,
+  0 ID switches, FP 106, FN 551 / 1369 GT boxes. casa@−1.0 → MOTA 0.468, 5 switches.
+  FN-dominated: most lost GT is distant/occluded vehicles the detector misses at these thresholds.
 
 ### Tracker (3D SORT)
 - 10-dimensional Kalman filter state: `[x, y, z, l, w, h, yaw, vx, vy, vz]`

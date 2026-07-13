@@ -162,6 +162,7 @@ From the [KITTI tracking benchmark](https://www.cvlibs.net/datasets/kitti/eval_t
 - Velodyne point clouds
 - Camera calibration files
 - Ego vehicle poses
+- Training labels (ground truth, for evaluation)
 
 Place under `multi_object_tracking/data/` with the structure:
 ```
@@ -170,6 +171,7 @@ multi_object_tracking/data/
   image_02/0008/000000.png ...
   calib/0008.txt
   pose/0008/pose.txt
+  label_02/0008.txt
 ```
 
 ### 7. Run
@@ -179,6 +181,28 @@ python main.py
 ```
 
 Produces `tracking.rrd` (open with `rerun tracking.rrd`) and `showcase.mp4`.
+
+---
+
+## Evaluation
+
+Measure tracking quality against KITTI ground truth (CLEAR-MOT metrics via
+[motmetrics](https://github.com/cheind/py-motmetrics)):
+
+```bash
+python evaluate.py                                    # pvrcnn, seq 0008
+python evaluate.py --detector casa --score-threshold -1.0
+```
+
+Confirmed tracks are matched to ground-truth vehicles (Car/Van/Truck) on
+bird's-eye-view centre distance (2 m gate, nuScenes-style) in the world frame.
+
+Baseline on sequence 0008 (pre-computed detections, default tracker settings):
+
+| Detector | MOTA | MOTP | IDF1 | ID sw. | FP | FN |
+|---|---|---|---|---|---|---|
+| `pvrcnn` @ 0.5 | **0.520** | 0.256 m | **0.713** | 0 | 106 | 551 |
+| `casa` @ −1.0 | 0.468 | 0.284 m | 0.682 | 5 | 185 | 538 |
 
 ---
 
@@ -233,9 +257,11 @@ perception/                   Core library
     geometry.py               project_box_to_image
     rerun_vis.py              Rerun SDK visualization
     video.py                  MP4 export with dual camera/LiDAR panels
+  evaluation.py               CLEAR-MOT metrics against KITTI tracking ground truth
 
 tests/                        Unit tests (pytest)
 main.py                       Entry point
+evaluate.py                   Tracking evaluation entry point (CLEAR-MOT)
 detector.py                   OpenPCDet live inference wrapper (model-agnostic)
 requirements.txt
 
