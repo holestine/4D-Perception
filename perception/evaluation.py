@@ -181,6 +181,44 @@ def evaluate_hota(frames, max_dist=4.0, alphas=None):
     }
 
 
+def read_nuscenes_gt(sequence, classes=_VEHICLE_CLASSES):
+    """Extract per-frame ground truth from a NuScenesSequence.
+
+    Parameters
+    ----------
+    sequence : NuScenesSequence
+    classes  : tuple[str]  canonical class names to keep (matched via CATEGORY_MAP)
+
+    Returns
+    -------
+    dict  frame_id -> (global_xy (N, 2) float64, instance_ids (N,) int)
+        Positions are in the nuScenes global frame — the same frame the tracker
+        registers boxes into via ego_pose — so distances are directly comparable.
+    """
+    from perception.datasets.nuscenes import CATEGORY_MAP
+
+    classes_set = set(classes)
+    instance_map = {}   # instance_token (str) → stable int ID
+
+    per_frame = {}
+    for frame_id, sample_token in enumerate(sequence.sample_tokens):
+        anns = sequence.tables.annotations.get(sample_token, [])
+        xys, ids = [], []
+        for ann in anns:
+            category = sequence.tables.category[
+                sequence.tables.instance[ann["instance_token"]]["category_token"]
+            ]
+            if CATEGORY_MAP.get(category["name"]) not in classes_set:
+                continue
+            xys.append(ann["translation"][:2])
+            ids.append(instance_map.setdefault(ann["instance_token"], len(instance_map)))
+        per_frame[frame_id] = (
+            np.array(xys, dtype=float).reshape(-1, 2),
+            np.array(ids, dtype=int),
+        )
+    return per_frame
+
+
 _METRICS = (
     "mota", "motp", "idf1", "num_switches", "num_fragmentations",
     "num_false_positives", "num_misses", "num_objects",
