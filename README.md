@@ -85,7 +85,7 @@ World frame:   ego-vehicle pose applied to LiDAR frame
 
 **Rerun:** Per-track 3D car mesh (`.obj`) scaled per-axis to match detector output — `car.obj` native size 8.95 × 3.71 × 2.97 m mapped to each detected box. Points inside confirmed track volumes masked out so meshes are not buried by their own returns.
 
-**MP4:** LiDAR depth panel computed by projecting every point through `V2C → P2` (the same matrices used for the camera), so detections align pixel-for-pixel across both panels. OBJ wireframes rendered using crease-edge filtering (dihedral > 50°, retaining ~1,236 of 8,174 edges) for clean car outlines without triangle noise.
+**MP4:** LiDAR depth panel computed by projecting every point through `V2C → P2` (the same matrices used for the camera), so detections align pixel-for-pixel across both panels. OBJ wireframes rendered using crease-edge filtering (dihedral > 50°, retaining ~1,236 of 8,174 edges) for clean car outlines without triangle noise. Playback runs in real time regardless of capture rate: low-rate captures (nuScenes 2 Hz keyframes) duplicate the camera/LiDAR pixels across subframes while box and mesh poses are interpolated per track — ego-motion compensated, shortest-arc yaw — so track motion stays smooth.
 
 ---
 
@@ -284,10 +284,11 @@ perception/                   Core library
     track.py                  Obstacle3D — per-track Kalman filter
     mot.py                    Tracker3D — Hungarian assignment + track lifecycle
   visualization/
+    common.py                 Shared constants/helpers (car mesh path, track colours)
     geometry.py               project_box_to_image
     rerun_vis.py              Rerun SDK visualization
     video.py                  MP4 export with dual camera/LiDAR panels
-  evaluation.py               CLEAR-MOT metrics against KITTI tracking ground truth
+  evaluation.py               HOTA + CLEAR-MOT metrics against tracking ground truth
   cli.py                      Shared command-line options for the entry points
 
 tests/                        Unit tests (pytest)
@@ -316,8 +317,8 @@ OpenPCDet/                    Detection backbone (cloned, locally modified for s
 | Dataset | Status | Notes |
 |---|---|---|
 | KITTI Tracking | ✅ Done | 21 sequences, 64-beam Velodyne HDL-64E |
+| nuScenes | ✅ Done | Adapter reads the JSON tables directly (no devkit); GT served as detections — a nuScenes-trained detector and multi-sweep accumulation are the remaining pieces |
 | Waymo Open Dataset | Planned | 1,150 segments, 5-beam top LiDAR + 4 side LiDAR; different coordinate system; richer ego-motion |
-| nuScenes | Planned | 1,000 scenes, 6-camera surround, 32-beam LiDAR, multi-sweep accumulation |
 
 ### Detectors
 
@@ -337,14 +338,14 @@ OpenPCDet/                    Detection backbone (cloned, locally modified for s
 | CTRA motion model | Planned | Constant turn-rate and acceleration — better for turning vehicles |
 | Appearance features | Planned | Re-ID embedding to recover tracks after long occlusion |
 | Multi-class tracking | Planned | Separate lifecycle params per class (pedestrian vs. vehicle) |
-| HOTA / MOTA / MOTP evaluation | Planned | Quantitative benchmark against KITTI tracking ground truth |
+| HOTA / CLEAR-MOT evaluation | ✅ Done | HOTA implemented per Luiten et al.; CLEAR-MOT via motmetrics — see Evaluation above |
 
 ### Infrastructure
 
 | Feature | Status | Notes |
 |---|---|---|
 | Per-sequence config files | Planned | YAML-driven scene configuration rather than hardcoded constants |
-| nuScenes devkit integration | Planned | Standardized evaluation via the official nuScenes tracking API |
+| Official nuScenes tracking metrics | Planned | Match the official tracking evaluation without the devkit (it pins numpy < 2; rerun needs ≥ 2) |
 | ROS 2 node | Planned | Wrap the tracker as a ROS 2 node for real-time sensor input |
 
 ---
@@ -361,7 +362,7 @@ OpenPCDet/                    Detection backbone (cloned, locally modified for s
 | Sensor math | NumPy ≥ 2, SciPy Rotation |
 | 3D visualization | Rerun SDK 0.33.1 |
 | Video export | OpenCV |
-| Dataset | KITTI Tracking Benchmark |
+| Datasets | KITTI Tracking Benchmark, nuScenes |
 
 ---
 
