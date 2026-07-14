@@ -69,21 +69,31 @@ class Tracker3D:
         """Mahalanobis distance matrix (N tracks × M detections), class-gated."""
         cost = np.zeros((len(predictions), len(detections)))
         for i, (pred, traj) in enumerate(zip(predictions, self.trajectories)):
-            H          = traj.kf.H
-            S          = H @ traj.kf.P @ H.T + traj.kf.R
-            S_inv      = np.linalg.inv(S)
+            # Innovation covariance: how much uncertainty exists in the predicted
+            # measurement space. Combines state uncertainty (H P Hᵀ) with sensor
+            # noise (R) — larger S means the filter expects more spread, so the
+            # same physical offset yields a smaller Mahalanobis distance.
+            H     = traj.kf.H
+            S     = H @ traj.kf.P @ H.T + traj.kf.R
+            S_inv = np.linalg.inv(S)
+
             traj_group = self._group_of(traj.name)
             for j, det in enumerate(detections):
                 if groups[j] != traj_group:
                     cost[i, j] = _GROUP_MISMATCH_COST
                     continue
                 diff    = det[:7] - pred
+                # Wrap yaw residual to (−π, π] so a 350°/10° pair costs the
+                # same as a 10° difference, not a 340° one.
                 diff[6] = (diff[6] + np.pi) % (2 * np.pi) - np.pi
+                # √(diffᵀ S⁻¹ diff): the standard Mahalanobis distance,
+                # dimensionless and comparable across all state dimensions.
                 cost[i, j] = float(np.sqrt(diff @ S_inv @ diff))
         return cost
 
     def _associate(self, detections, scores, names):
         """Predict, match, update tracks; return det_index → track_id map."""
+        # Step 1 — predict: advance every track's Kalman filter one step.
         predictions = [t.predict() for t in self.trajectories]
         groups      = [self._group_of(n) for n in names]
 
@@ -91,14 +101,19 @@ class Tracker3D:
         det_to_track_id = {}
 
         if self.trajectories and len(detections) > 0:
-            cost             = self._cost_matrix(predictions, detections, groups)
-            row_ind, col_ind = linear_sum_assignment(cost)
-            for r, c in zip(row_ind, col_ind):
-                if cost[r, c] < self.dist_threshold:
-                    self.trajectories[r].update(detections[c], scores[c])
-                    matched_dets.add(c)
-                    det_to_track_id[c] = self.trajectories[r].id
+            # Step 2 — associate: find the globally optimal 1-to-1 assignment
+            # between tracks and detections, then accept only pairs whose
+            # Mahalanobis distance is within the gate.
+            cost                   = self._cost_matrix(predictions, detections, groups)
+            track_ind, det_ind     = linear_sum_assignment(cost)
+            for track, det in zip(track_ind, det_ind):
+                if cost[track, det] < self.dist_threshold:
+                    self.trajectories[track].update(detections[det], scores[det])
+                    matched_dets.add(det)
+                    det_to_track_id[det] = self.trajectories[track].id
 
+        # Step 3 — birth: every unmatched detection spawns a new tentative track.
+        # Tracks are tentative until they accumulate min_hits consecutive hits.
         for j, (box, score) in enumerate(zip(detections, scores)):
             if j not in matched_dets:
                 self.trajectories.append(Obstacle3D(
@@ -108,6 +123,9 @@ class Tracker3D:
                 ))
                 self._next_id += 1
 
+        # Step 4 — death: evict tracks that have been unmatched for too long.
+        # Remove from _confirmed_ids first so confirmed status doesn't outlive
+        # the track object.
         dead_ids = {
             t.id for t in self.trajectories
             if t.time_since_update >= self.max_missed
@@ -141,6 +159,8 @@ class Tracker3D:
         """
         self.frame_count += 1
 
+        # Drop low-confidence detections before tracking, but remember the full
+        # count so det_ids can be indexed back into the caller's original array.
         scores = np.asarray(scores, dtype=float)
         n_full = len(scores)
         mask   = scores > self.score_threshold
@@ -148,24 +168,32 @@ class Tracker3D:
         if names is None:
             names_kept = [None] * int(mask.sum())
         else:
-            names_kept = [n for n, keep in zip(names, mask) if keep]
+            names_kept = [name for name, keep in zip(names, mask) if keep]
 
-        # copy: register_bbs works in place and callers keep their boxes
+        # np.array() copies so register_bbs doesn't mutate the caller's boxes.
         boxes_kept = np.array(boxes, dtype=np.float64).reshape(-1, 7)[mask, :7]
         if len(boxes_kept) > 0:
+            # Transform detections into the world frame so the Kalman filter
+            # state and measurements share a fixed reference frame across frames.
             boxes_kept = register_bbs(boxes_kept, pose)
 
         det_to_track_id = self._associate(boxes_kept, scores[mask], names_kept)
 
+        # Promote any track that has now accumulated enough consecutive hits.
         for t in self.trajectories:
             if t.hit_streak >= self.min_hits:
                 self._confirmed_ids.add(t.id)
 
+        # During the warm-up period (first min_hits frames) treat all tracks as
+        # confirmed so the visualizer has something to show immediately.
         confirmed_ids = {
             t.id for t in self.trajectories
             if t.id in self._confirmed_ids or self.frame_count <= self.min_hits
         }
 
+        # Map each input detection back to its confirmed track ID (0 = none).
+        # det_ids_kept works over the filtered subset; it's then scattered back
+        # into a full-length array aligned with the caller's detection list.
         det_ids_kept = np.zeros(int(mask.sum()), dtype=int)
         for det_idx, track_id in det_to_track_id.items():
             if track_id in confirmed_ids:
@@ -177,8 +205,16 @@ class Tracker3D:
         return ids, bbs, scores_out, det_ids
 
     def _get_confirmed(self):
+        """Current confirmed tracks as (ids, Kalman-state boxes, scores).
+
+        Boxes come from get_state(), so a track missed this frame still
+        reports its coasted (predicted) position rather than vanishing.
+        """
         ids, boxes, scores = [], [], []
         for t in self.trajectories:
+            # Same warm-up grace as the confirmed_ids set in update(): during
+            # the first min_hits frames no track can be confirmed yet, so all
+            # are reported to avoid an empty start of every sequence.
             if t.id in self._confirmed_ids or self.frame_count <= self.min_hits:
                 ids.append(t.id)
                 boxes.append(t.get_state())
