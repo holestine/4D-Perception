@@ -47,10 +47,14 @@ tests/                        Unit tests — run with `python -m pytest tests/`
 main.py                       Entry point: argparse CLI, tracking loop, visualizer calls
 evaluate.py                   Evaluation entry point (argparse; detector/threshold/gate options)
 detector.py                   OpenPCDet live detector wrapper (model-agnostic)
+export_detections.py          Regenerate pre-computed detection .txt files via live inference
+                               (GPU; scores come out sigmoid, not raw logits like the shipped files)
 
-multi_object_tracking/        Data only, gitignored (code was ported into perception/ in July 2026)
-  detectors/                  Pre-computed detection .txt files: pvrcnn/, casa/, second_iou/, point_rcnn/
-  data/                       Raw KITTI data: velodyne/, image_02/, calib/, pose/, label_02/ (GT)
+multi_object_tracking/        Data (code was ported into perception/ in July 2026)
+  detectors/                  Pre-computed detection .txt files: pvrcnn/, casa/, second_iou/,
+                               point_rcnn/ — tracked in git (they need a GPU to regenerate)
+  data/                       Raw KITTI data, gitignored: velodyne/, image_02/, calib/, pose/,
+                               label_02/ (GT) — re-download per README
 
 models/
   PointRCNN/pointrcnn_7870.pth

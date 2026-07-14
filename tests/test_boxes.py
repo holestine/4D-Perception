@@ -6,6 +6,7 @@ from perception.boxes import (
     box_corners_3d,
     interpolate_boxes,
     kitti_camera_to_lidar,
+    lidar_to_kitti_camera,
     register_bbs,
 )
 
@@ -34,6 +35,26 @@ class TestKittiCameraToLidar:
         kitti = np.array([[h, 1.0, 1.0, 0.0, 0.0, 5.0, 0.0]])
         box = kitti_camera_to_lidar(kitti, V2C)[0]
         assert box[2] == pytest.approx(h / 2, abs=1e-6)
+
+
+class TestLidarToKittiCamera:
+    def test_round_trip(self, V2C):
+        lidar = np.array([[10.0, 2.0, -0.5, 4.0, 1.8, 1.5, 0.7],
+                          [-3.0, 8.0,  1.2, 3.6, 1.6, 1.4, -2.1]], dtype=np.float32)
+        back = kitti_camera_to_lidar(lidar_to_kitti_camera(lidar, V2C), V2C)
+        np.testing.assert_allclose(back, lidar, atol=1e-4)
+
+    def test_known_values(self, V2C):
+        # Inverse of TestKittiCameraToLidar.test_known_values
+        lidar = np.array([[10.0, 2.0, -0.5, 4.0, 1.8, 1.5, -0.4 - np.pi / 2]])
+        kitti = lidar_to_kitti_camera(lidar, V2C)[0]
+        np.testing.assert_allclose(kitti[:3], [1.5, 1.8, 4.0], atol=1e-6)
+        np.testing.assert_allclose(kitti[3:6], [-2.0, 1.25, 10.0], atol=1e-5)
+        assert kitti[6] == pytest.approx(0.4, abs=1e-6)
+
+    def test_empty_input(self, V2C):
+        out = lidar_to_kitti_camera(np.zeros((0, 7), dtype=np.float32), V2C)
+        assert out.shape == (0, 7)
 
 
 class TestBoxCorners3D:

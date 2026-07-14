@@ -91,7 +91,7 @@ World frame:   ego-vehicle pose applied to LiDAR frame
 
 ## Detector Comparison
 
-Four pre-computed detector outputs are included for sequence 0008. **Scores are raw logits** — scale varies per model; adjust `score_threshold` when switching.
+Four pre-computed detector outputs are included for sequence 0008 (tracked in git, so plain `python main.py` works after the KITTI download — no GPU needed). **Scores are raw logits** — scale varies per model; adjust `score_threshold` when switching. `export_detections.py` regenerates files like these via live inference (GPU; note it emits sigmoid scores, not logits).
 
 | Detector | KITTI Car AP (moderate) | Avg dets/frame at threshold | Empty frames | Notes |
 |---|---|---|---|---|
@@ -293,13 +293,15 @@ perception/                   Core library
 
 tests/                        Unit tests (pytest)
 main.py                       Entry point (argparse CLI)
-evaluate.py                   Tracking evaluation entry point (CLEAR-MOT)
+evaluate.py                   Tracking evaluation entry point (HOTA + CLEAR-MOT)
+evaluate_nuscenes.py          nuScenes evaluation entry point (GT-as-detections)
+export_detections.py          Regenerate pre-computed detection files (live inference, GPU)
 detector.py                   OpenPCDet live inference wrapper (model-agnostic)
 requirements.txt
 
-multi_object_tracking/        Data only (not tracked in git)
-  detectors/                  Pre-computed detections: pvrcnn/, casa/, second_iou/, point_rcnn/
-  data/                       Raw KITTI sequences
+multi_object_tracking/        Data
+  detectors/                  Pre-computed detections (tracked in git): pvrcnn/, casa/, second_iou/, point_rcnn/
+  data/                       Raw KITTI sequences (gitignored — download per Setup)
 
 models/
   PointRCNN/pointrcnn_7870.pth

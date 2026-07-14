@@ -19,7 +19,7 @@ multi_object_tracking/tracker/box_op.py
 
 import numpy as np
 
-from perception.datasets.kitti_io import cam_to_velo
+from perception.datasets.kitti_io import cam_to_velo, velo_to_cam
 
 # Corner order produced by box_corners_3d: 0-3 bottom ring, 4-7 top ring,
 # corner k directly below corner k+4.
@@ -59,6 +59,36 @@ def kitti_camera_to_lidar(boxes_kitti, V2C):
     boxes[:, 5]  = h
     boxes[:, 6]  = -boxes_kitti[:, 6] - np.pi / 2  # yaw = -ry - π/2
     return boxes
+
+
+def lidar_to_kitti_camera(boxes, V2C):
+    """Convert canonical LiDAR-frame boxes to KITTI camera-frame label boxes.
+
+    Inverse of kitti_camera_to_lidar: box centres drop to the bottom-face
+    convention and move to the rectified camera frame, yaw maps back to ry.
+
+    Parameters
+    ----------
+    boxes : ndarray (N, 7)  [x, y, z_center, l, w, h, yaw] LiDAR frame
+    V2C   : ndarray (4, 4)  LiDAR-to-camera transform from read_calib
+
+    Returns
+    -------
+    ndarray (N, 7)  [h, w, l, x, y, z_bottom, ry] camera frame
+    """
+    boxes = np.asarray(boxes, dtype=np.float32).reshape(-1, 7)
+    kitti = np.zeros_like(boxes)
+    if len(boxes) == 0:
+        return kitti
+
+    bottom = boxes[:, :3].copy()
+    bottom[:, 2] -= boxes[:, 5] / 2               # centre → bottom face
+    kitti[:, 0]   = boxes[:, 5]                   # h
+    kitti[:, 1]   = boxes[:, 4]                   # w
+    kitti[:, 2]   = boxes[:, 3]                   # l
+    kitti[:, 3:6] = velo_to_cam(bottom, V2C)
+    kitti[:, 6]   = -boxes[:, 6] - np.pi / 2      # ry = -yaw - π/2 (self-inverse)
+    return kitti
 
 
 def box_corners_3d(box):

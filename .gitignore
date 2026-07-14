@@ -221,7 +221,11 @@ __marimo__/
 kaggle
 data/
 *.zip
-multi_object_tracking/
+# KITTI raw data stays local (re-download per README), but the pre-computed
+# detector outputs are tracked — they cannot be regenerated without a GPU
+# (see export_detections.py).
+multi_object_tracking/*
+!multi_object_tracking/detectors/
 # external clone with local patches; has its own .git — see CLAUDE.md for modified files
 OpenPCDet/
 *.rrd
