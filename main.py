@@ -34,6 +34,8 @@ def parse_args():
 
     nusc = p.add_argument_group("nuscenes (--dataset nuscenes)")
     nusc.add_argument("--nusc-root", default="data/nuscenes")
+    nusc.add_argument("--nusc-version", default="v1.0-mini",
+                      help="table version, e.g. v1.0-mini or v1.0-trainval")
     nusc.add_argument("--scene", default="0",
                       help="scene index (name-sorted) or name, e.g. scene-0061")
 
@@ -65,7 +67,8 @@ def main():
     if args.dataset == "nuscenes":
         from perception.datasets.nuscenes import NuScenesGTDetections, NuScenesSequence
         scene = int(args.scene) if args.scene.isdigit() else args.scene
-        dataset = NuScenesSequence(args.nusc_root, scene=scene)
+        dataset = NuScenesSequence(args.nusc_root, scene=scene,
+                                   version=args.nusc_version)
         dataset.detections = NuScenesGTDetections(dataset)
         dt = 0.5                             # nuScenes keyframes are 2 Hz
     else:
