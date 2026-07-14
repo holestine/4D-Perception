@@ -16,7 +16,11 @@
             "type": "debugpy",
             "request": "launch",
             "program": "main.py",
-            "console": "integratedTerminal"
+            "console": "integratedTerminal",
+            "args": ["--dataset",
+                     "nuscenes",
+                     "--scene",
+                     "1"]
         },
         {
             "name": "Python: Unit Tests",
