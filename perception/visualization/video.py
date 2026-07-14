@@ -214,7 +214,10 @@ def create_tracking_video(
                     v_hom = np.hstack([v3d, np.ones((len(v3d), 1))])
                     v_cam = (V2C @ v_hom.T).T
                     v_img = (P2 @ v_cam.T).T
-                    in_fv = v_cam[:, 2] > 0
+                    # Require a minimum depth, not just z > 0: vertices a hair
+                    # in front of the camera plane project to pixel coordinates
+                    # beyond OpenCV's int32 range and crash cv2.line.
+                    in_fv = v_cam[:, 2] > 0.1
                     vpx   = np.where(in_fv, v_img[:, 0] / v_img[:, 2], -1.0).astype(np.float32)
                     vpy   = np.where(in_fv, v_img[:, 1] / v_img[:, 2], -1.0).astype(np.float32)
                     for vi, vj in obj_edges:

@@ -253,6 +253,11 @@ so the same `score_threshold` value means different things.
 - Video loop: index into `final_det_ids` with the actual frame number `i`, not enumerate index `idx`
 - `hit_streak` resets on any missed frame — large vehicles never accumulate enough consecutive hits
   to stay confirmed; solved with `_confirmed_ids` set that survives missed frames
+- **Mesh wireframe vertices near the camera plane overflow int32**: the LiDAR-panel
+  OBJ projection masked only `z > 0`; a vertex millimetres in front of the camera
+  projects to pixel coords beyond OpenCV's int32 range and `cv2.line` throws
+  "Can't parse 'pt1'". Fix: require `z > 0.1` m (video.py). The camera panel was
+  never affected — `project_box_to_image` guards and clips.
 - **Behind-camera detections span the entire image**: PV-RCNN detects in 360° LiDAR space, so it
   produces valid detections behind the camera (negative Z in camera coords). Dividing by negative Z
   in `project_box_to_image` flips coordinates; when corners straddle Z=0 the results are
