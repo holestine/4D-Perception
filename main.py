@@ -37,7 +37,9 @@ def parse_args():
     nusc.add_argument("--nusc-version", default="v1.0-mini",
                       help="table version, e.g. v1.0-mini or v1.0-trainval")
     nusc.add_argument("--scene", default="0",
-                      help="scene index (name-sorted) or name, e.g. scene-0061")
+                      help="scene index (name-sorted) or name, e.g. scene-0061; "
+                           "stitch consecutive same-log scenes with a name range "
+                           "'scene-0711..scene-0719' or a comma list")
 
     live = p.add_argument_group("live inference (--live)")
     live.add_argument("--live", action="store_true",
@@ -61,12 +63,22 @@ def parse_args():
     return p.parse_args()
 
 
+def parse_scene(arg):
+    """Parse --scene: index, name, comma list, or 'a..b' inclusive name range."""
+    if ".." in arg:
+        lo, hi = (int(part.split("-")[-1]) for part in arg.split(".."))
+        return [f"scene-{i:04d}" for i in range(lo, hi + 1)]
+    if "," in arg:
+        return [int(s) if s.isdigit() else s for s in arg.split(",")]
+    return int(arg) if arg.isdigit() else arg
+
+
 def main():
     args = parse_args()
 
     if args.dataset == "nuscenes":
         from perception.datasets.nuscenes import NuScenesGTDetections, NuScenesSequence
-        scene = int(args.scene) if args.scene.isdigit() else args.scene
+        scene = parse_scene(args.scene)
         dataset = NuScenesSequence(args.nusc_root, scene=scene,
                                    version=args.nusc_version)
         dataset.detections = NuScenesGTDetections(dataset)

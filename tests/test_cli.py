@@ -31,3 +31,14 @@ def test_dataset_defaults():
     args = _parse([])
     assert args.detector == "pvrcnn"
     assert args.seq == 8
+
+
+class TestParseScene:
+    def test_forms(self):
+        from main import parse_scene
+        assert parse_scene("5") == 5
+        assert parse_scene("scene-0061") == "scene-0061"
+        assert parse_scene("scene-0711..scene-0713") == [
+            "scene-0711", "scene-0712", "scene-0713"]
+        assert parse_scene("711..713") == ["scene-0711", "scene-0712", "scene-0713"]
+        assert parse_scene("3,scene-0061") == [3, "scene-0061"]

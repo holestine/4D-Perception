@@ -98,3 +98,16 @@ class TestNuScenesIntegration:
                 pose=frame.ego_pose, names=frame.detections.names,
             )
         assert len(ids) >= 5                 # GT-as-detections tracks confirm quickly
+
+    def test_stitched_scenes_concatenate(self, dataset):
+        from perception.datasets.nuscenes import NuScenesSequence
+        stitched = NuScenesSequence(DATAROOT, scene=[0, 1])
+        other    = NuScenesSequence(DATAROOT, scene=1)
+        assert len(stitched) == len(dataset) + len(other)
+        assert ".." in stitched.scene_name
+        # boundary frames come from the right scenes
+        assert stitched.sample_tokens[len(dataset) - 1] == dataset.sample_tokens[-1]
+        assert stitched.sample_tokens[len(dataset)] == other.sample_tokens[0]
+        frame = stitched[len(dataset)]       # first frame past the boundary loads
+        assert frame.frame_id == len(dataset)
+        assert frame.points.shape[1] == 4

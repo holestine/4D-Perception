@@ -121,7 +121,13 @@ class _Tables:
 
 
 class NuScenesSequence(SequenceDataset):
-    """Adapter for one scene of a nuScenes split (keyframes only, 2 Hz).
+    """Adapter for one or more scenes of a nuScenes split (keyframes only, 2 Hz).
+
+    Passing several scenes stitches them into one continuous sequence.
+    Consecutive scenes from the same log are contiguous captures (~0.5 s
+    apart) with ego poses in a shared global frame, so tracks survive the
+    scene boundaries; stitching scenes from different logs "teleports" the
+    ego between unrelated world frames and is not meaningful.
 
     Remember to set the tracker's dt to 0.5 for nuScenes keyframes.
     """
@@ -132,13 +138,21 @@ class NuScenesSequence(SequenceDataset):
         Parameters
         ----------
         dataroot   : str  directory containing v1.0-mini/, samples/, sweeps/
-        scene      : int or str  scene index (name-sorted) or name, e.g. "scene-0061"
+        scene      : int, str, or list of these
+            scene index (name-sorted) or name, e.g. "scene-0061"; a list
+            stitches the scenes in the given order
         version    : str  table directory name
         camera     : str  camera channel used for Frame.image
         detections : DetectionSource, optional (see NuScenesGTDetections)
         """
         self.tables = _Tables(dataroot, version)
-        self.scene_name, self.sample_tokens = self.tables.scene_samples(scene)
+        scenes = scene if isinstance(scene, (list, tuple)) else [scene]
+        names, self.sample_tokens = [], []
+        for s in scenes:
+            name, tokens = self.tables.scene_samples(s)
+            names.append(name)
+            self.sample_tokens.extend(tokens)
+        self.scene_name = names[0] if len(names) == 1 else f"{names[0]}..{names[-1]}"
         self.camera = camera
         self.detections = detections
 
