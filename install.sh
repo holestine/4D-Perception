@@ -31,11 +31,27 @@ CUDA_MAJOR=$(echo "$CUDA_VERSION" | cut -d. -f1)
 CUDA_MINOR=$(echo "$CUDA_VERSION" | cut -d. -f2)
 echo "Detected CUDA $CUDA_VERSION"
 
+# GPU compute capability decides which PyTorch wheels actually run: the cu128
+# wheels only ship kernels for sm_75 (Turing) and newer, so Pascal cards like
+# the GTX 1080 (sm_61) need cu126 or older even when the toolkit is 12.8+.
+COMPUTE_CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 || true)
+if [[ -n "$COMPUTE_CAP" ]]; then
+    echo "Detected GPU compute capability $COMPUTE_CAP"
+else
+    echo "WARNING: could not query GPU compute capability (old driver?); assuming a modern GPU."
+fi
+pre_turing() { [[ -n "$COMPUTE_CAP" ]] && awk -v c="$COMPUTE_CAP" 'BEGIN { exit !(c < 7.5) }'; }
+
 # ---------------------------------------------------------------------------
 # 2. Select PyTorch index URL and spconv package based on CUDA version.
 #    spconv has no cu128 build; cu124 is binary-compatible with CUDA 12.8.
 # ---------------------------------------------------------------------------
-if   [[ $CUDA_MAJOR -ge 12 && $CUDA_MINOR -ge 8 ]]; then
+if   [[ $CUDA_MAJOR -ge 12 && $CUDA_MINOR -ge 8 ]] && pre_turing; then
+    echo "Pre-Turing GPU (sm < 7.5): cu128 wheels would not run — using cu126 wheels instead."
+    TORCH_INDEX="https://download.pytorch.org/whl/cu126"
+    TORCH_SPEC="torch==2.7.0+cu126"   # last wheel family with Pascal/Volta kernels
+    SPCONV_PKG="spconv-cu124"
+elif [[ $CUDA_MAJOR -ge 12 && $CUDA_MINOR -ge 8 ]]; then
     TORCH_INDEX="https://download.pytorch.org/whl/cu128"
     TORCH_SPEC="torch==2.7.0+cu128"   # tested version for Blackwell / sm_120
     SPCONV_PKG="spconv-cu124"

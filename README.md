@@ -108,9 +108,11 @@ Four pre-computed detector outputs are included for sequence 0008 (tracked in gi
 
 ### Requirements
 
-- Python 3.10
-- CUDA 12.8+ (tested on RTX 5080 / Blackwell sm_120; any CUDA 11.8+ GPU should work with adjusted PyTorch build)
-- Conda
+- Python 3.10, Conda
+- A GPU is only needed for **live inference** (`--live`, `export_detections.py`): any
+  CUDA 11.8+ card from Pascal (GTX 10-series) up — tested on an RTX 5080 (sm_120).
+  The default pre-computed-detection path, the nuScenes demo, evaluation, and the
+  visualizations all run on CPU.
 
 ### 1. Create the environment
 
@@ -119,36 +121,30 @@ conda create -n 4D python=3.10 -y
 conda activate 4D
 ```
 
-### 2. Install PyTorch
+### 2. Install dependencies
 
-**RTX 5080 / Ada / Hopper (CUDA 12.8):**
-```bash
-pip install torch==2.7.0+cu128 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
-```
-
-**RTX 3090 / 4090 / A100 (CUDA 11.8):**
-```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-```
-
-### 3. Install dependencies
+**CPU-only** (pre-computed detections, nuScenes, evaluation, tests):
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Install OpenPCDet
+**With live inference** — `install.sh` detects your CUDA toolkit and GPU, installs
+matching PyTorch/spconv builds, clones OpenPCDet at the tested commit, applies the
+compatibility patch, and builds the CUDA extensions:
 
 ```bash
-git clone https://github.com/open-mmlab/OpenPCDet.git
-cd OpenPCDet
-pip install -e .
-cd ..
+bash install.sh
 ```
 
-> **Note for RTX 5080 users:** sm_120 requires PyTorch cu128 and nvcc 12.8. See [OpenPCDet docs](https://github.com/open-mmlab/OpenPCDet/blob/master/docs/INSTALL.md) for build details.
+> **GPU compatibility:** PyTorch's cu128 wheels only ship kernels for Turing
+> (sm_75) and newer — `install.sh` detects pre-Turing cards (e.g. GTX 1080,
+> sm_61) and falls back to cu126 wheels automatically. Avoid CUDA 13 toolkits
+> on Pascal; support was removed entirely.
+> **RTX 5080 / Blackwell:** sm_120 needs nvcc + cicc 12.8 on PATH (see the note
+> in `install.sh` for the conda symlinks).
 
-### 5. Download model weights (for live inference)
+### 3. Download model weights (for live inference)
 
 PV-RCNN checkpoint from the [OpenPCDet model zoo](https://github.com/open-mmlab/OpenPCDet/blob/master/docs/MODEL_ZOO.md):
 
@@ -157,7 +153,7 @@ mkdir -p models/PVRCNN
 # Download pv_rcnn_8369.pth to models/PVRCNN/
 ```
 
-### 6. Download KITTI Tracking data
+### 4. Download KITTI Tracking data
 
 From the [KITTI tracking benchmark](https://www.cvlibs.net/datasets/kitti/eval_tracking.php), download:
 - Left color images
@@ -176,7 +172,7 @@ multi_object_tracking/data/
   label_02/0008.txt
 ```
 
-### 7. Run
+### 5. Run
 
 ```bash
 python main.py
