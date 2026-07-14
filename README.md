@@ -1,29 +1,30 @@
 # 4D Perception — 3D Multi-Object Tracking
 
-A full-stack autonomous vehicle perception pipeline: LiDAR + camera sensor fusion, 3D Kalman filter tracking, and interactive dual-modality visualization — built from first principles on the KITTI tracking benchmark.
+A full-stack autonomous vehicle perception pipeline: LiDAR + camera sensor fusion, 3D Kalman filter tracking, quantitative evaluation (HOTA / CLEAR-MOT), and interactive dual-modality visualization — built from first principles on the KITTI tracking benchmark, with a nuScenes adapter.
 
 ---
 
 ## Pipeline Overview
 
 ```
-KITTI Sequence
+KITTI / nuScenes Sequence (dataset adapter → Frame)
       │
-      ├─ LiDAR point cloud (.bin)  ──►  3D Object Detector  ──►  Detection boxes [h,w,l,x,y,z,ry]
-      │                                  (PV-RCNN / pre-computed)          │
-      └─ Camera image (.png)                                               │
-      └─ Calibration + Ego pose                                            ▼
-                                                              3D SORT Tracker
-                                                         (Kalman filter + Hungarian)
-                                                                           │
-                                          ┌────────────────────────────────┤
-                                          │                                │
-                                          ▼                                ▼
-                                 Rerun Visualization               MP4 Video Export
-                              (camera + LiDAR 3D view)         (camera + LiDAR depth)
+      ├─ LiDAR point cloud   ──►  Detection Source  ──►  Canonical boxes [x,y,z,l,w,h,yaw]
+      │                           (live PV-RCNN /                    │
+      ├─ Camera image              pre-computed / GT)                │
+      └─ Calibration + Ego pose                                      ▼
+                                                          3D SORT Tracker
+                                            (Kalman + Hungarian, class-gated)
+                                                                     │
+                                ┌──────────────────┬─────────────────┤
+                                │                  │                 │
+                                ▼                  ▼                 ▼
+                       Rerun Visualization   MP4 Video Export    Evaluation
+                     (camera + LiDAR 3D)   (camera + LiDAR)   (HOTA + CLEAR-MOT)
 ```
 
 **Key numbers on KITTI sequence 0008 (390 frames):**
+- **HOTA 0.633 / MOTA 0.553** with pre-computed PV-RCNN detections (see Evaluation)
 - Tracker runs at **~1,500 fps** (Kalman + Hungarian step only)
 - PV-RCNN live inference: **~8 fps** on RTX 5080
 - Pre-computed detections: full sequence processes in **< 1 second**
@@ -75,9 +76,9 @@ LiDAR frame:   x = forward, y = left,  z = up        (RIGHT_HAND_Z_UP)
 World frame:   ego-vehicle pose applied to LiDAR frame
 ```
 
-- KITTI calibration chain: `Velodyne → R0_rect → P2` applied consistently in all views
-- Box centre lifted from KITTI bottom-face convention: `z_centre = z_bottom + h/2`
-- Yaw convention: `yaw_lidar = −ry − π/2`
+- One **canonical box format** — `[x, y, z_center, l, w, h, yaw]` in the LiDAR frame (`perception/boxes.py`) — used everywhere; dataset adapters convert at the boundary
+- KITTI calibration chain: `Velodyne → R0_rect → P2`; label boxes lifted from the bottom-face convention (`z_centre = z_bottom + h/2`, `yaw = −ry − π/2`)
+- nuScenes chain: `LiDAR → ego(t_lidar) → global → ego(t_cam) → camera`, honouring the timestamp offset between sensors; global-frame annotations converted to LiDAR-frame canonical boxes
 - Ego-vehicle pose integrated every frame so box centres are tracked in a consistent world frame, eliminating drift from vehicle motion
 
 ### Visualization
