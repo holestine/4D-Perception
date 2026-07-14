@@ -1,28 +1,19 @@
-#conda deactivate; conda env remove --name 4D -y
-#conda create --name 4D python=3.10 cudatoolkit=11.7 -c conda-forge -y
-#conda activate 4D; pip install -r requirements.txt
-
-ipykernel
-tqdm
-easydict
-opencv-python
-scikit-image
-torch>=2.0
-torchvision
-torchaudio
-matplotlib
-pyquaternion==0.9.9
-spconv-cu124
-SharedArray2
-ipyvtklink
-open3d
-Pillow
-PyYAML
-requests
-rerun-sdk[notebook]==0.33.1
+# Core pipeline dependencies — install via install.sh (handles PyTorch + spconv
+# CUDA variants automatically) or manually for CPU-only / non-KITTI use.
 numpy>=2
 scipy==1.14.1
 filterpy
+opencv-python
+PyYAML
+easydict
+tqdm
+
+# Visualization
+rerun-sdk[notebook]==0.33.1
+
+# Evaluation
+motmetrics
+
+# Dev
 pytest
 ruff
-motmetrics

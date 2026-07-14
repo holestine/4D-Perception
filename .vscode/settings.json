@@ -1,5 +1,8 @@
 {
     "python-envs.defaultEnvManager": "ms-python.python:conda",
     "python-envs.defaultPackageManager": "ms-python.python:conda",
-    "git.ignoredRepositories": ["/home/brian/code/4D-Perception/multi_object_tracking"],
+    "git.ignoredRepositories": [
+        "/home/brian/code/4D-Perception/multi_object_tracking",
+        "/home/brian/code/4D-Perception/OpenPCDet"
+    ],
 }

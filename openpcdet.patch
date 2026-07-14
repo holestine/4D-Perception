@@ -1,0 +1,456 @@
+diff --git a/pcdet/config.py b/pcdet/config.py
+index 02e5daf..d55930d 100644
+--- a/pcdet/config.py
++++ b/pcdet/config.py
+@@ -48,9 +48,19 @@ def cfg_from_list(cfg_list, config):
+             d[subkey] = value
+ 
+ 
+-def merge_new_config(config, new_config):
++def merge_new_config(config, new_config, cfg_dir=None):
+     if '_BASE_CONFIG_' in new_config:
+-        with open(new_config['_BASE_CONFIG_'], 'r') as f:
++        base_path = new_config['_BASE_CONFIG_']
++        if cfg_dir is not None and not Path(base_path).is_absolute():
++            # Walk up from cfg_dir until the relative path resolves to an existing file.
++            search = cfg_dir
++            while search != search.parent:
++                candidate = search / base_path
++                if candidate.exists():
++                    base_path = candidate
++                    break
++                search = search.parent
++        with open(base_path, 'r') as f:
+             try:
+                 yaml_config = yaml.safe_load(f, Loader=yaml.FullLoader)
+             except:
+@@ -63,19 +73,20 @@ def merge_new_config(config, new_config):
+             continue
+         if key not in config:
+             config[key] = EasyDict()
+-        merge_new_config(config[key], val)
++        merge_new_config(config[key], val, cfg_dir=cfg_dir)
+ 
+     return config
+ 
+ 
+ def cfg_from_yaml_file(cfg_file, config):
++    cfg_file = Path(cfg_file).resolve()
+     with open(cfg_file, 'r') as f:
+         try:
+             new_config = yaml.safe_load(f, Loader=yaml.FullLoader)
+         except:
+             new_config = yaml.safe_load(f)
+ 
+-        merge_new_config(config=config, new_config=new_config)
++        merge_new_config(config=config, new_config=new_config, cfg_dir=cfg_file.parent)
+ 
+     return config
+ 
+diff --git a/pcdet/datasets/__init__.py b/pcdet/datasets/__init__.py
+index 47c3900..3de7d68 100644
+--- a/pcdet/datasets/__init__.py
++++ b/pcdet/datasets/__init__.py
+@@ -12,7 +12,6 @@ from .waymo.waymo_dataset import WaymoDataset
+ from .pandaset.pandaset_dataset import PandasetDataset
+ from .lyft.lyft_dataset import LyftDataset
+ from .once.once_dataset import ONCEDataset
+-from .argo2.argo2_dataset import Argo2Dataset
+ from .custom.custom_dataset import CustomDataset
+ 
+ __all__ = {
+@@ -24,7 +23,6 @@ __all__ = {
+     'LyftDataset': LyftDataset,
+     'ONCEDataset': ONCEDataset,
+     'CustomDataset': CustomDataset,
+-    'Argo2Dataset': Argo2Dataset
+ }
+ 
+ 
+diff --git a/pcdet/models/backbones_3d/__init__.py b/pcdet/models/backbones_3d/__init__.py
+index 0a25c62..39c95d4 100644
+--- a/pcdet/models/backbones_3d/__init__.py
++++ b/pcdet/models/backbones_3d/__init__.py
+@@ -1,22 +1,32 @@
+ from .pointnet2_backbone import PointNet2Backbone, PointNet2MSG
+-from .spconv_backbone import VoxelBackBone8x, VoxelResBackBone8x
+-from .spconv_backbone_2d import PillarBackBone8x, PillarRes18BackBone8x
+-from .spconv_backbone_focal import VoxelBackBone8xFocal
+-from .spconv_backbone_voxelnext import VoxelResBackBone8xVoxelNeXt
+-from .spconv_backbone_voxelnext2d import VoxelResBackBone8xVoxelNeXt2D
+-from .spconv_unet import UNetV2
++
++try:
++    from .spconv_backbone import VoxelBackBone8x, VoxelResBackBone8x
++    from .spconv_backbone_2d import PillarBackBone8x, PillarRes18BackBone8x
++    from .spconv_backbone_focal import VoxelBackBone8xFocal
++    from .spconv_backbone_voxelnext import VoxelResBackBone8xVoxelNeXt
++    from .spconv_backbone_voxelnext2d import VoxelResBackBone8xVoxelNeXt2D
++    from .spconv_unet import UNetV2
++    _SPCONV_AVAILABLE = True
++except ImportError:
++    _SPCONV_AVAILABLE = False
++
+ from .dsvt import DSVT
+ 
+ __all__ = {
+-    'VoxelBackBone8x': VoxelBackBone8x,
+-    'UNetV2': UNetV2,
+     'PointNet2Backbone': PointNet2Backbone,
+     'PointNet2MSG': PointNet2MSG,
+-    'VoxelResBackBone8x': VoxelResBackBone8x,
+-    'VoxelBackBone8xFocal': VoxelBackBone8xFocal,
+-    'VoxelResBackBone8xVoxelNeXt': VoxelResBackBone8xVoxelNeXt,
+-    'VoxelResBackBone8xVoxelNeXt2D': VoxelResBackBone8xVoxelNeXt2D,
+-    'PillarBackBone8x': PillarBackBone8x,
+-    'PillarRes18BackBone8x': PillarRes18BackBone8x,
+     'DSVT': DSVT,
+ }
++
++if _SPCONV_AVAILABLE:
++    __all__.update({
++        'VoxelBackBone8x': VoxelBackBone8x,
++        'UNetV2': UNetV2,
++        'VoxelResBackBone8x': VoxelResBackBone8x,
++        'VoxelBackBone8xFocal': VoxelBackBone8xFocal,
++        'VoxelResBackBone8xVoxelNeXt': VoxelResBackBone8xVoxelNeXt,
++        'VoxelResBackBone8xVoxelNeXt2D': VoxelResBackBone8xVoxelNeXt2D,
++        'PillarBackBone8x': PillarBackBone8x,
++        'PillarRes18BackBone8x': PillarRes18BackBone8x,
++    })
+diff --git a/pcdet/models/dense_heads/target_assigner/anchor_generator.py b/pcdet/models/dense_heads/target_assigner/anchor_generator.py
+index 0aa6861..edf589a 100644
+--- a/pcdet/models/dense_heads/target_assigner/anchor_generator.py
++++ b/pcdet/models/dense_heads/target_assigner/anchor_generator.py
+@@ -44,7 +44,7 @@ class AnchorGenerator(object):
+             anchor_size = x_shifts.new_tensor(anchor_size)
+             x_shifts, y_shifts, z_shifts = torch.meshgrid([
+                 x_shifts, y_shifts, z_shifts
+-            ])  # [x_grid, y_grid, z_grid]
++            ], indexing='ij')  # [x_grid, y_grid, z_grid]
+             anchors = torch.stack((x_shifts, y_shifts, z_shifts), dim=-1)  # [x, y, z, 3]
+             anchors = anchors[:, :, :, None, :].repeat(1, 1, 1, anchor_size.shape[0], 1)
+             anchor_size = anchor_size.view(1, 1, 1, -1, 3).repeat([*anchors.shape[0:3], 1, 1])
+diff --git a/pcdet/models/dense_heads/transfusion_head.py b/pcdet/models/dense_heads/transfusion_head.py
+index 742211b..dcaeb07 100644
+--- a/pcdet/models/dense_heads/transfusion_head.py
++++ b/pcdet/models/dense_heads/transfusion_head.py
+@@ -126,7 +126,7 @@ class TransFusionHead(nn.Module):
+         meshgrid = [[0, x_size - 1, x_size], [0, y_size - 1, y_size]]
+         # NOTE: modified
+         batch_x, batch_y = torch.meshgrid(
+-            *[torch.linspace(it[0], it[1], it[2]) for it in meshgrid]
++            *[torch.linspace(it[0], it[1], it[2]) for it in meshgrid], indexing='ij'
+         )
+         batch_x = batch_x + 0.5
+         batch_y = batch_y + 0.5
+diff --git a/pcdet/models/model_utils/centernet_utils.py b/pcdet/models/model_utils/centernet_utils.py
+index d24f1ca..4a5ec70 100644
+--- a/pcdet/models/model_utils/centernet_utils.py
++++ b/pcdet/models/model_utils/centernet_utils.py
+@@ -367,7 +367,7 @@ def decode_bbox_from_pred_dicts(pred_dict, point_cloud_range=None, voxel_size=No
+     angle = torch.atan2(batch_rot_sin, batch_rot_cos)  # (B, H*W, 1)
+ 
+     ys, xs = torch.meshgrid([torch.arange(0, H, device=batch_center.device, dtype=batch_center.dtype),
+-                             torch.arange(0, W, device=batch_center.device, dtype=batch_center.dtype)])
++                             torch.arange(0, W, device=batch_center.device, dtype=batch_center.dtype)], indexing='ij')
+     ys = ys.view(1, H, W).repeat(batch_size, 1, 1)
+     xs = xs.view(1, H, W).repeat(batch_size, 1, 1)
+     xs = xs.view(batch_size, -1, 1) + batch_center[:, :, 0:1]
+diff --git a/pcdet/models/roi_heads/__init__.py b/pcdet/models/roi_heads/__init__.py
+index 693cec4..8c67dce 100644
+--- a/pcdet/models/roi_heads/__init__.py
++++ b/pcdet/models/roi_heads/__init__.py
+@@ -1,4 +1,3 @@
+-from .partA2_head import PartA2FCHead
+ from .pointrcnn_head import PointRCNNHead
+ from .pvrcnn_head import PVRCNNHead
+ from .second_head import SECONDHead
+@@ -7,9 +6,14 @@ from .roi_head_template import RoIHeadTemplate
+ from .mppnet_head import MPPNetHead
+ from .mppnet_memory_bank_e2e import MPPNetHeadE2E
+ 
++try:
++    from .partA2_head import PartA2FCHead
++    _PART_A2_AVAILABLE = True
++except ImportError:
++    _PART_A2_AVAILABLE = False
++
+ __all__ = {
+     'RoIHeadTemplate': RoIHeadTemplate,
+-    'PartA2FCHead': PartA2FCHead,
+     'PVRCNNHead': PVRCNNHead,
+     'SECONDHead': SECONDHead,
+     'PointRCNNHead': PointRCNNHead,
+@@ -17,3 +21,6 @@ __all__ = {
+     'MPPNetHead': MPPNetHead,
+     'MPPNetHeadE2E': MPPNetHeadE2E,
+ }
++
++if _PART_A2_AVAILABLE:
++    __all__['PartA2FCHead'] = PartA2FCHead
+diff --git a/pcdet/models/roi_heads/mppnet_head.py b/pcdet/models/roi_heads/mppnet_head.py
+index 909b9c7..302cf16 100644
+--- a/pcdet/models/roi_heads/mppnet_head.py
++++ b/pcdet/models/roi_heads/mppnet_head.py
+@@ -339,7 +339,7 @@ class MPPNetHead(RoIHeadTemplate):
+ 
+         if self.model_cfg.Transformer.use_grid_pos.enabled:
+             if self.model_cfg.Transformer.use_grid_pos.init_type == 'index':
+-                self.grid_index = torch.cat([i.reshape(-1,1)for i in torch.meshgrid(torch.arange(self.grid_size), torch.arange(self.grid_size), torch.arange(self.grid_size))],1).float().cuda()
++                self.grid_index = torch.cat([i.reshape(-1,1)for i in torch.meshgrid(torch.arange(self.grid_size), torch.arange(self.grid_size), torch.arange(self.grid_size), indexing='ij')],1).float().cuda()
+                 self.grid_pos_embeded = MLP(input_dim = 3, hidden_dim = 256, output_dim = hidden_dim, num_layers = 2)
+             else:
+                 self.pos = nn.Parameter(torch.zeros(1, self.num_grid_points, 256))
+diff --git a/pcdet/models/roi_heads/mppnet_memory_bank_e2e.py b/pcdet/models/roi_heads/mppnet_memory_bank_e2e.py
+index b8af7f3..9eb074e 100644
+--- a/pcdet/models/roi_heads/mppnet_memory_bank_e2e.py
++++ b/pcdet/models/roi_heads/mppnet_memory_bank_e2e.py
+@@ -55,7 +55,7 @@ class MPPNetHeadE2E(RoIHeadTemplate):
+ 
+         if self.model_cfg.Transformer.use_grid_pos.enabled:
+             if self.model_cfg.Transformer.use_grid_pos.init_type == 'index':
+-                self.grid_index = torch.cat([i.reshape(-1,1)for i in torch.meshgrid(torch.arange(self.grid_size), torch.arange(self.grid_size), torch.arange(self.grid_size))],1).float().cuda()
++                self.grid_index = torch.cat([i.reshape(-1,1)for i in torch.meshgrid(torch.arange(self.grid_size), torch.arange(self.grid_size), torch.arange(self.grid_size), indexing='ij')],1).float().cuda()
+                 self.grid_pos_embeded = MLP(input_dim = 3, hidden_dim = 256, output_dim = hidden_dim, num_layers = 2)
+             else:
+                 self.pos = nn.Parameter(torch.zeros(1, self.num_grid_points, 256))
+diff --git a/pcdet/ops/iou3d_nms/iou3d_nms_utils.py b/pcdet/ops/iou3d_nms/iou3d_nms_utils.py
+index b63ca0d..f990a5c 100644
+--- a/pcdet/ops/iou3d_nms/iou3d_nms_utils.py
++++ b/pcdet/ops/iou3d_nms/iou3d_nms_utils.py
+@@ -38,7 +38,7 @@ def boxes_iou_bev(boxes_a, boxes_b):
+         ans_iou: (N, M)
+     """
+     assert boxes_a.shape[1] == boxes_b.shape[1] == 7
+-    ans_iou = torch.cuda.FloatTensor(torch.Size((boxes_a.shape[0], boxes_b.shape[0]))).zero_()
++    ans_iou = torch.empty(torch.Size((boxes_a.shape[0], boxes_b.shape[0])), dtype=torch.float32, device="cuda").zero_()
+ 
+     iou3d_nms_cuda.boxes_iou_bev_gpu(boxes_a.contiguous(), boxes_b.contiguous(), ans_iou)
+ 
+@@ -63,7 +63,7 @@ def boxes_iou3d_gpu(boxes_a, boxes_b):
+     boxes_b_height_min = (boxes_b[:, 2] - boxes_b[:, 5] / 2).view(1, -1)
+ 
+     # bev overlap
+-    overlaps_bev = torch.cuda.FloatTensor(torch.Size((boxes_a.shape[0], boxes_b.shape[0]))).zero_()  # (N, M)
++    overlaps_bev = torch.empty(torch.Size((boxes_a.shape[0], boxes_b.shape[0])), dtype=torch.float32, device="cuda").zero_()  # (N, M)
+     iou3d_nms_cuda.boxes_overlap_bev_gpu(boxes_a.contiguous(), boxes_b.contiguous(), overlaps_bev)
+ 
+     max_of_min = torch.max(boxes_a_height_min, boxes_b_height_min)
+@@ -99,7 +99,7 @@ def boxes_aligned_iou3d_gpu(boxes_a, boxes_b):
+     boxes_b_height_min = (boxes_b[:, 2] - boxes_b[:, 5] / 2).view(-1, 1)
+ 
+     # bev overlap
+-    overlaps_bev = torch.cuda.FloatTensor(torch.Size((boxes_a.shape[0], 1))).zero_()  # (N, M)
++    overlaps_bev = torch.empty(torch.Size((boxes_a.shape[0], 1)), dtype=torch.float32, device="cuda").zero_()  # (N, M)
+     iou3d_nms_cuda.boxes_aligned_overlap_bev_gpu(boxes_a.contiguous(), boxes_b.contiguous(), overlaps_bev)
+ 
+     max_of_min = torch.max(boxes_a_height_min, boxes_b_height_min)
+@@ -171,7 +171,7 @@ def paired_boxes_iou3d_gpu(boxes_a, boxes_b):
+     boxes_b_height_min = (boxes_b[:, 2] - boxes_b[:, 5] / 2).view(-1, 1)
+ 
+     # bev overlap
+-    overlaps_bev = torch.cuda.FloatTensor(torch.Size((boxes_a.shape[0], 1))).zero_()  # (N, ``)
++    overlaps_bev = torch.empty(torch.Size((boxes_a.shape[0], 1)), dtype=torch.float32, device="cuda").zero_()  # (N, ``)
+     iou3d_nms_cuda.paired_boxes_overlap_bev_gpu(boxes_a.contiguous(), boxes_b.contiguous(), overlaps_bev)
+ 
+     max_of_min = torch.max(boxes_a_height_min, boxes_b_height_min)
+diff --git a/pcdet/ops/pointnet2/pointnet2_batch/pointnet2_utils.py b/pcdet/ops/pointnet2/pointnet2_batch/pointnet2_utils.py
+index c57afe1..8d36250 100644
+--- a/pcdet/ops/pointnet2/pointnet2_batch/pointnet2_utils.py
++++ b/pcdet/ops/pointnet2/pointnet2_batch/pointnet2_utils.py
+@@ -22,8 +22,8 @@ class FarthestPointSampling(Function):
+         assert xyz.is_contiguous()
+ 
+         B, N, _ = xyz.size()
+-        output = torch.cuda.IntTensor(B, npoint)
+-        temp = torch.cuda.FloatTensor(B, N).fill_(1e10)
++        output = torch.empty(B, npoint, dtype=torch.int32, device="cuda")
++        temp = torch.empty(B, N, dtype=torch.float32, device="cuda").fill_(1e10)
+ 
+         pointnet2.farthest_point_sampling_wrapper(B, N, npoint, xyz, temp, output)
+         return output
+@@ -52,7 +52,7 @@ class GatherOperation(Function):
+ 
+         B, npoint = idx.size()
+         _, C, N = features.size()
+-        output = torch.cuda.FloatTensor(B, C, npoint)
++        output = torch.empty(B, C, npoint, dtype=torch.float32, device="cuda")
+ 
+         pointnet2.gather_points_wrapper(B, C, N, npoint, features, idx, output)
+ 
+@@ -64,7 +64,7 @@ class GatherOperation(Function):
+         idx, C, N = ctx.for_backwards
+         B, npoint = idx.size()
+ 
+-        grad_features = Variable(torch.cuda.FloatTensor(B, C, N).zero_())
++        grad_features = Variable(torch.empty(B, C, N, dtype=torch.float32, device="cuda").zero_())
+         grad_out_data = grad_out.data.contiguous()
+         pointnet2.gather_points_grad_wrapper(B, C, N, npoint, grad_out_data, idx, grad_features.data)
+         return grad_features, None
+@@ -91,8 +91,8 @@ class ThreeNN(Function):
+ 
+         B, N, _ = unknown.size()
+         m = known.size(1)
+-        dist2 = torch.cuda.FloatTensor(B, N, 3)
+-        idx = torch.cuda.IntTensor(B, N, 3)
++        dist2 = torch.empty(B, N, 3, dtype=torch.float32, device="cuda")
++        idx = torch.empty(B, N, 3, dtype=torch.int32, device="cuda")
+ 
+         pointnet2.three_nn_wrapper(B, N, m, unknown, known, dist2, idx)
+         return torch.sqrt(dist2), idx
+@@ -125,7 +125,7 @@ class ThreeInterpolate(Function):
+         B, c, m = features.size()
+         n = idx.size(1)
+         ctx.three_interpolate_for_backward = (idx, weight, m)
+-        output = torch.cuda.FloatTensor(B, c, n)
++        output = torch.empty(B, c, n, dtype=torch.float32, device="cuda")
+ 
+         pointnet2.three_interpolate_wrapper(B, c, m, n, features, idx, weight, output)
+         return output
+@@ -143,7 +143,7 @@ class ThreeInterpolate(Function):
+         idx, weight, m = ctx.three_interpolate_for_backward
+         B, c, n = grad_out.size()
+ 
+-        grad_features = Variable(torch.cuda.FloatTensor(B, c, m).zero_())
++        grad_features = Variable(torch.empty(B, c, m, dtype=torch.float32, device="cuda").zero_())
+         grad_out_data = grad_out.data.contiguous()
+ 
+         pointnet2.three_interpolate_grad_wrapper(B, c, n, m, grad_out_data, idx, weight, grad_features.data)
+@@ -169,7 +169,7 @@ class GroupingOperation(Function):
+ 
+         B, nfeatures, nsample = idx.size()
+         _, C, N = features.size()
+-        output = torch.cuda.FloatTensor(B, C, nfeatures, nsample)
++        output = torch.empty(B, C, nfeatures, nsample, dtype=torch.float32, device="cuda")
+ 
+         pointnet2.group_points_wrapper(B, C, N, nfeatures, nsample, features, idx, output)
+ 
+@@ -187,7 +187,7 @@ class GroupingOperation(Function):
+         idx, N = ctx.for_backwards
+ 
+         B, C, npoint, nsample = grad_out.size()
+-        grad_features = Variable(torch.cuda.FloatTensor(B, C, N).zero_())
++        grad_features = Variable(torch.empty(B, C, N, dtype=torch.float32, device="cuda").zero_())
+ 
+         grad_out_data = grad_out.data.contiguous()
+         pointnet2.group_points_grad_wrapper(B, C, N, npoint, nsample, grad_out_data, idx, grad_features.data)
+@@ -215,7 +215,7 @@ class BallQuery(Function):
+ 
+         B, N, _ = xyz.size()
+         npoint = new_xyz.size(1)
+-        idx = torch.cuda.IntTensor(B, npoint, nsample).zero_()
++        idx = torch.empty(B, npoint, nsample, dtype=torch.int32, device="cuda").zero_()
+ 
+         pointnet2.ball_query_wrapper(B, N, npoint, radius, nsample, new_xyz, xyz, idx)
+         return idx
+diff --git a/pcdet/ops/pointnet2/pointnet2_stack/pointnet2_modules.py b/pcdet/ops/pointnet2/pointnet2_stack/pointnet2_modules.py
+index 0210ab2..036b211 100644
+--- a/pcdet/ops/pointnet2/pointnet2_stack/pointnet2_modules.py
++++ b/pcdet/ops/pointnet2/pointnet2_stack/pointnet2_modules.py
+@@ -84,7 +84,7 @@ class StackSAModuleMSG(nn.Module):
+         :param features: (N1 + N2 ..., C) tensor of the descriptors of the the features
+         :return:
+             new_xyz: (M1 + M2 ..., 3) tensor of the new features' xyz
+-            new_features: (M1 + M2 ..., \sum_k(mlps[k][-1])) tensor of the new_features descriptors
++            new_features: (M1 + M2 ..., sum_k(mlps[k][-1])) tensor of the new_features descriptors
+         """
+         new_features_list = []
+         for k in range(len(self.groupers)):
+@@ -349,7 +349,7 @@ class VectorPoolAggregationModule(nn.Module):
+         x_grids = torch.arange(-R + R / num_voxels[0], R - R / num_voxels[0] + 1e-5, 2 * R / num_voxels[0], device=device)
+         y_grids = torch.arange(-R + R / num_voxels[1], R - R / num_voxels[1] + 1e-5, 2 * R / num_voxels[1], device=device)
+         z_grids = torch.arange(-R + R / num_voxels[2], R - R / num_voxels[2] + 1e-5, 2 * R / num_voxels[2], device=device)
+-        x_offset, y_offset, z_offset = torch.meshgrid(x_grids, y_grids, z_grids)  # shape: [num_x, num_y, num_z]
++        x_offset, y_offset, z_offset = torch.meshgrid(x_grids, y_grids, z_grids, indexing='ij')  # shape: [num_x, num_y, num_z]
+         xyz_offset = torch.cat((
+             x_offset.contiguous().view(-1, 1),
+             y_offset.contiguous().view(-1, 1),
+@@ -389,7 +389,7 @@ class VectorPoolAggregationModule(nn.Module):
+         :param features: (N1 + N2 ..., C) tensor of the descriptors of the the features
+         :return:
+             new_xyz: (M1 + M2 ..., 3) tensor of the new features' xyz
+-            new_features: (M1 + M2 ..., \sum_k(mlps[k][-1])) tensor of the new_features descriptors
++            new_features: (M1 + M2 ..., sum_k(mlps[k][-1])) tensor of the new_features descriptors
+         """
+         N, C = features.shape
+ 
+diff --git a/pcdet/ops/pointnet2/pointnet2_stack/pointnet2_utils.py b/pcdet/ops/pointnet2/pointnet2_stack/pointnet2_utils.py
+index cd2c1f3..5208e5a 100644
+--- a/pcdet/ops/pointnet2/pointnet2_stack/pointnet2_utils.py
++++ b/pcdet/ops/pointnet2/pointnet2_stack/pointnet2_utils.py
+@@ -30,7 +30,7 @@ class BallQuery(Function):
+ 
+         B = xyz_batch_cnt.shape[0]
+         M = new_xyz.shape[0]
+-        idx = torch.cuda.IntTensor(M, nsample).zero_()
++        idx = torch.empty(M, nsample, dtype=torch.int32, device="cuda").zero_()
+ 
+         pointnet2.ball_query_wrapper(B, M, radius, nsample, new_xyz, new_xyz_batch_cnt, xyz, xyz_batch_cnt, idx)
+         empty_ball_mask = (idx[:, 0] == -1)
+@@ -78,7 +78,7 @@ class GroupingOperation(Function):
+         M, nsample = idx.size()
+         N, C = features.size()
+         B = idx_batch_cnt.shape[0]
+-        output = torch.cuda.FloatTensor(M, C, nsample)
++        output = torch.empty(M, C, nsample, dtype=torch.float32, device="cuda")
+ 
+         pointnet2.group_points_wrapper(B, M, C, nsample, features, features_batch_cnt, idx, idx_batch_cnt, output)
+ 
+@@ -98,7 +98,7 @@ class GroupingOperation(Function):
+         B, N, idx, features_batch_cnt, idx_batch_cnt = ctx.for_backwards
+ 
+         M, C, nsample = grad_out.size()
+-        grad_features = Variable(torch.cuda.FloatTensor(N, C).zero_())
++        grad_features = Variable(torch.empty(N, C, dtype=torch.float32, device="cuda").zero_())
+ 
+         grad_out_data = grad_out.data.contiguous()
+         pointnet2.group_points_grad_wrapper(B, M, C, N, nsample, grad_out_data, idx,
+@@ -174,8 +174,8 @@ class FarthestPointSampling(Function):
+         assert xyz.is_contiguous()
+ 
+         B, N, _ = xyz.size()
+-        output = torch.cuda.IntTensor(B, npoint)
+-        temp = torch.cuda.FloatTensor(B, N).fill_(1e10)
++        output = torch.empty(B, npoint, dtype=torch.int32, device="cuda")
++        temp = torch.empty(B, N, dtype=torch.float32, device="cuda").fill_(1e10)
+ 
+         pointnet2.farthest_point_sampling_wrapper(B, N, npoint, xyz, temp, output)
+         return output
+@@ -211,8 +211,8 @@ class StackFarthestPointSampling(Function):
+             npoint = torch.tensor(npoint, device=xyz.device).int()
+ 
+         N, _ = xyz.size()
+-        temp = torch.cuda.FloatTensor(N).fill_(1e10)
+-        output = torch.cuda.IntTensor(npoint.sum().item())
++        temp = torch.empty(N, dtype=torch.float32, device="cuda").fill_(1e10)
++        output = torch.empty(npoint.sum().item(), dtype=torch.int32, device="cuda")
+ 
+         pointnet2.stack_farthest_point_sampling_wrapper(xyz, temp, xyz_batch_cnt, output, npoint)
+         return output
+diff --git a/pcdet/ops/pointnet2/pointnet2_stack/voxel_query_utils.py b/pcdet/ops/pointnet2/pointnet2_stack/voxel_query_utils.py
+index b22da2d..930f2fe 100644
+--- a/pcdet/ops/pointnet2/pointnet2_stack/voxel_query_utils.py
++++ b/pcdet/ops/pointnet2/pointnet2_stack/voxel_query_utils.py
+@@ -30,7 +30,7 @@ class VoxelQuery(Function):
+ 
+         M = new_coords.shape[0]
+         B, Z, Y, X = point_indices.shape
+-        idx = torch.cuda.IntTensor(M, nsample).zero_()
++        idx = torch.empty(M, nsample, dtype=torch.int32, device="cuda").zero_()
+ 
+         z_range, y_range, x_range = max_range
+         pointnet2.voxel_query_wrapper(M, Z, Y, X, nsample, radius, z_range, y_range, x_range, \
+diff --git a/pcdet/utils/loss_utils.py b/pcdet/utils/loss_utils.py
+index bd114ba..ddd9f65 100644
+--- a/pcdet/utils/loss_utils.py
++++ b/pcdet/utils/loss_utils.py
+@@ -149,7 +149,7 @@ class WeightedL1Loss(nn.Module):
+             self.code_weights = np.array(code_weights, dtype=np.float32)
+             self.code_weights = torch.from_numpy(self.code_weights).cuda()
+ 
+-    @torch.cuda.amp.custom_fwd(cast_inputs=torch.float16)
++    @torch.amp.custom_fwd(cast_inputs=torch.float16, device_type='cuda')
+     def forward(self, input: torch.Tensor, target: torch.Tensor, weights: torch.Tensor = None):
+         """
+         Args:
