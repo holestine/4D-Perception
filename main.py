@@ -53,7 +53,9 @@ def parse_args():
     vis.add_argument("--no-video", action="store_true", help="skip the MP4 exports")
     vis.add_argument("--showcase-frames", type=int, nargs=2, default=(205, 265),
                      metavar=("START", "END"), help="frame range for showcase.mp4")
-    vis.add_argument("--showcase-fps", type=int, default=5)
+    vis.add_argument("--showcase-fps", type=float, default=None,
+                     help="container fps for showcase.mp4 (default: real-time "
+                          "playback derived from the dataset capture rate)")
     return p.parse_args()
 
 
@@ -118,11 +120,19 @@ def main():
         )
 
     if not args.no_video:
+        # Real-time playback: duplicate frames so low-rate captures (nuScenes
+        # 2 Hz keyframes) fill a ≥10 fps container, with boxes interpolated
+        # between capture frames so track motion stays smooth.
+        subframes = max(1, round(10 * dt))
+        fps = subframes / dt
+
         create_tracking_video(
             dataset,
             frame_indices,
             final_det_ids,
             show_unconfirmed_above=args.show_unconfirmed_above,
+            fps=fps,
+            subframes=subframes,
             out_file="tracking.mp4",
         )
 
@@ -133,7 +143,8 @@ def main():
                 range(start, min(end, n_frames)),
                 final_det_ids,
                 show_unconfirmed_above=args.show_unconfirmed_above,
-                fps=args.showcase_fps,
+                fps=args.showcase_fps or fps,
+                subframes=subframes,
                 out_file="showcase.mp4",
             )
 

@@ -208,6 +208,12 @@ so the same `score_threshold` value means different things.
 
 ### MP4 Video Export
 - Stacked layout: camera panel (top) + LiDAR depth panel (bottom)
+- Real-time playback: main.py derives `subframes = max(1, round(10*dt))` and
+  `fps = subframes/dt` — KITTI writes 1 frame per capture at 10 fps, nuScenes 5.
+  Camera/LiDAR pixels are duplicated across subframes while boxes/meshes are
+  interpolated per track ID (`interpolate_boxes` in boxes.py: ego-motion
+  compensated via poses, lerp centre/extents, shortest-arc yaw). `--showcase-fps`
+  (default None = real time) overrides the container rate for showcase.mp4
 - LiDAR projected through `V2C → P2` so detections align pixel-for-pixel with camera panel
 - Depth coloring: plasma colormap, far-to-near sort, 0–40 m range
 - Car mesh wireframes drawn from OBJ crease edges (dihedral > 50°, keeps ~1236 of 8174 edges)

@@ -2,7 +2,7 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 
-from perception.boxes import BOX_EDGES
+from perception.boxes import BOX_EDGES, interpolate_boxes
 from perception.visualization.common import (
     CAR_OBJ_NATIVE_SIZE,
     CAR_OBJ_PATH,
@@ -76,6 +76,7 @@ def create_tracking_video(
     show_unconfirmed_above=4.0,
     out_file="tracking.mp4",
     fps=10,
+    subframes=1,
     output_height=480,
 ):
     """Render tracked detections to an MP4 with camera + LiDAR depth panels.
@@ -93,7 +94,12 @@ def create_tracking_video(
         Also draw unconfirmed detections scoring above this (default 4 —
         raw-logit scale, so sigmoid-scored detections are never drawn).
     out_file       : str             output path
-    fps            : int
+    fps            : float           container frame rate
+    subframes      : int
+        Video frames written per capture frame. Above 1, the camera image and
+        point cloud are duplicated while boxes are interpolated toward the
+        next capture frame — lets low-rate captures (nuScenes 2 Hz keyframes)
+        play in real time without slideshow box motion.
     output_height  : int             pixel height of each panel
     """
     frames = list(frames)
@@ -104,8 +110,8 @@ def create_tracking_video(
 
     obj_verts, obj_edges = _load_obj_crease_edges(CAR_OBJ_PATH, crease_angle_deg=50)
 
-    first_img      = dataset[frames[0]].image
-    src_h, src_w   = first_img.shape[:2]
+    frame          = dataset[frames[0]]
+    src_h, src_w   = frame.image.shape[:2]
     cam_w          = int(src_w * H / src_h)
 
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -115,8 +121,6 @@ def create_tracking_video(
 
     print(f"Rendering {len(frames)} frames to '{out_file}' …")
     for idx, i in enumerate(frames):
-        frame = dataset[i]
-
         P2     = frame.camera.projection
         V2C    = frame.camera.lidar_to_cam
         points = frame.points
@@ -126,8 +130,17 @@ def create_tracking_video(
             frame.detections, final_det_ids[i], show_unconfirmed_above
         )
 
-        def _draw_boxes(img):
-            for box, track_id in zip(boxes_v, det_ids):
+        # The next frame doubles as the interpolation target and the next
+        # iteration's current frame, so each frame is loaded exactly once.
+        frame_next = dataset[frames[idx + 1]] if idx + 1 < len(frames) else None
+        if subframes > 1 and frame_next is not None:
+            boxes_n, ids_n, _ = select_visible(
+                frame_next.detections, final_det_ids[frames[idx + 1]],
+                show_unconfirmed_above,
+            )
+
+        def _draw_boxes(img, boxes):
+            for box, track_id in zip(boxes, det_ids):
                 if track_id == 0:
                     continue
                 color = track_color(track_id)
@@ -145,13 +158,8 @@ def create_tracking_video(
                 cv2.putText(img, str(track_id), (cx, cy),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.45, bgr, 1, cv2.LINE_AA)
 
-        # ── Camera panel ──────────────────────────────────────────────────────
-        cam_img = image.copy()
-        _draw_boxes(cam_img)
-        cam_panel = cv2.resize(cam_img, (cam_w, H))
-
-        # ── LiDAR depth panel ─────────────────────────────────────────────────
-        lidar_img = np.zeros((src_h, src_w, 3), dtype=np.uint8)
+        # ── LiDAR depth background (points only, rendered once per capture frame)
+        lidar_bg = np.zeros((src_h, src_w, 3), dtype=np.uint8)
         pts_hom   = np.hstack([points[:, :3], np.ones((len(points), 1))])
         pts_cam   = (V2C @ pts_hom.T).T
         depth     = pts_cam[:, 2]
@@ -166,55 +174,73 @@ def create_tracking_video(
         px, py, depth = px[order], py[order], depth[order]
         depth_n = np.clip(1.0 - depth / 40.0, 0.0, 1.0)
         rgba    = (plt.cm.plasma(depth_n)[:, :3] * 255).astype(np.uint8)
-        lidar_img[py, px, 0] = rgba[:, 2]
-        lidar_img[py, px, 1] = rgba[:, 1]
-        lidar_img[py, px, 2] = rgba[:, 0]
+        lidar_bg[py, px, 0] = rgba[:, 2]
+        lidar_bg[py, px, 1] = rgba[:, 1]
+        lidar_bg[py, px, 2] = rgba[:, 0]
 
-        for box, track_id, name in zip(boxes_v, det_ids, names_v):
-            if track_id == 0:
-                continue
-            color = track_color(track_id)
-            bgr   = (int(color[2]), int(color[1]), int(color[0]))
-            x_b, y_b, z_b, l_b, w_b, h_b, yaw = box.tolist()
-            if l_b * w_b * h_b <= 0:
-                continue
-
-            if name in MESH_CLASSES:
-                # Project scaled OBJ crease-edge wireframe into the LiDAR depth panel
-                c_y, s_y = np.cos(yaw), np.sin(yaw)
-                v3d      = obj_verts * (np.array([l_b, w_b, h_b]) / CAR_OBJ_NATIVE_SIZE)
-                R_z      = np.array([[c_y, -s_y, 0.0], [s_y, c_y, 0.0], [0.0, 0.0, 1.0]],
-                                    dtype=np.float32)
-                v3d  = v3d @ R_z.T
-                v3d += np.array([x_b, y_b, z_b], dtype=np.float32)
-                v_hom = np.hstack([v3d, np.ones((len(v3d), 1))])
-                v_cam = (V2C @ v_hom.T).T
-                v_img = (P2 @ v_cam.T).T
-                in_fv = v_cam[:, 2] > 0
-                vpx   = np.where(in_fv, v_img[:, 0] / v_img[:, 2], -1.0).astype(np.float32)
-                vpy   = np.where(in_fv, v_img[:, 1] / v_img[:, 2], -1.0).astype(np.float32)
-                for vi, vj in obj_edges:
-                    if not (in_fv[vi] and in_fv[vj]):
-                        continue
-                    cv2.line(lidar_img,
-                             (int(vpx[vi]), int(vpy[vi])),
-                             (int(vpx[vj]), int(vpy[vj])),
-                             bgr, 1, cv2.LINE_AA)
+        for k in range(subframes):
+            if k == 0 or frame_next is None:
+                boxes_r = boxes_v
             else:
-                # Cyclist / Pedestrian — project the 3D box corners (same as camera panel)
-                corners_2d = project_box_to_image(box, V2C, P2, lidar_img.shape)
-                if corners_2d is not None:
-                    for s, e in BOX_EDGES:
-                        cv2.line(lidar_img,
-                                 tuple(corners_2d[s].astype(int)),
-                                 tuple(corners_2d[e].astype(int)),
-                                 bgr, 1, cv2.LINE_AA)
+                boxes_r = interpolate_boxes(
+                    boxes_v, det_ids, boxes_n, ids_n, k / subframes,
+                    frame.ego_pose, frame_next.ego_pose,
+                )
 
-        lidar_panel = cv2.resize(lidar_img, (cam_w, H))
-        writer.write(np.vstack([cam_panel, lidar_panel]))
+            # ── Camera panel ──────────────────────────────────────────────────
+            cam_img = image.copy()
+            _draw_boxes(cam_img, boxes_r)
+            cam_panel = cv2.resize(cam_img, (cam_w, H))
+
+            # ── LiDAR depth panel ─────────────────────────────────────────────
+            lidar_img = lidar_bg.copy()
+            for box, track_id, name in zip(boxes_r, det_ids, names_v):
+                if track_id == 0:
+                    continue
+                color = track_color(track_id)
+                bgr   = (int(color[2]), int(color[1]), int(color[0]))
+                x_b, y_b, z_b, l_b, w_b, h_b, yaw = np.asarray(box).tolist()
+                if l_b * w_b * h_b <= 0:
+                    continue
+
+                if name in MESH_CLASSES:
+                    # Project scaled OBJ crease-edge wireframe into the LiDAR depth panel
+                    c_y, s_y = np.cos(yaw), np.sin(yaw)
+                    v3d      = obj_verts * (np.array([l_b, w_b, h_b]) / CAR_OBJ_NATIVE_SIZE)
+                    R_z      = np.array([[c_y, -s_y, 0.0], [s_y, c_y, 0.0], [0.0, 0.0, 1.0]],
+                                        dtype=np.float32)
+                    v3d  = v3d @ R_z.T
+                    v3d += np.array([x_b, y_b, z_b], dtype=np.float32)
+                    v_hom = np.hstack([v3d, np.ones((len(v3d), 1))])
+                    v_cam = (V2C @ v_hom.T).T
+                    v_img = (P2 @ v_cam.T).T
+                    in_fv = v_cam[:, 2] > 0
+                    vpx   = np.where(in_fv, v_img[:, 0] / v_img[:, 2], -1.0).astype(np.float32)
+                    vpy   = np.where(in_fv, v_img[:, 1] / v_img[:, 2], -1.0).astype(np.float32)
+                    for vi, vj in obj_edges:
+                        if not (in_fv[vi] and in_fv[vj]):
+                            continue
+                        cv2.line(lidar_img,
+                                 (int(vpx[vi]), int(vpy[vi])),
+                                 (int(vpx[vj]), int(vpy[vj])),
+                                 bgr, 1, cv2.LINE_AA)
+                else:
+                    # Cyclist / Pedestrian — project the 3D box corners (same as camera panel)
+                    corners_2d = project_box_to_image(box, V2C, P2, lidar_img.shape)
+                    if corners_2d is not None:
+                        for s, e in BOX_EDGES:
+                            cv2.line(lidar_img,
+                                     tuple(corners_2d[s].astype(int)),
+                                     tuple(corners_2d[e].astype(int)),
+                                     bgr, 1, cv2.LINE_AA)
+
+            lidar_panel = cv2.resize(lidar_img, (cam_w, H))
+            writer.write(np.vstack([cam_panel, lidar_panel]))
 
         if (idx + 1) % 50 == 0:
             print(f"  {idx + 1}/{len(frames)} frames rendered")
+        if frame_next is not None:
+            frame = frame_next
 
     writer.release()
     print(f"Video saved → '{out_file}'")
